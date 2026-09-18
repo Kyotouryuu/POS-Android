@@ -1,0 +1,73 @@
+{
+  "name": "zat-pos-desktop",
+  "version": "1.1.2",
+  "description": "ZAT POS - Offline Desktop App",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:mac": "electron-builder --mac",
+    "build:win": "electron-builder --win",
+    "build:linux": "electron-builder --linux",
+    "cap:open": "npx cap open android",
+    "cap:sync": "npx cap sync android",
+    "cap:copy": "npx cap copy android",
+    "cap:build": "cd android && ./gradlew assembleDebug",
+    "cap:release": "cd android && ./gradlew assembleRelease"
+  },
+  "build": {
+    "appId": "com.zat.pos",
+    "productName": "ZAT POS",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "icons/**/*"
+    ],
+    "extraResources": [
+      {
+        "from": "offline-pos",
+        "to": "offline-pos"
+      },
+      {
+        "from": "icons",
+        "to": "icons"
+      }
+    ],
+    "mac": {
+      "category": "public.app-category.business",
+      "icon": "icons/icon.icns"
+    },
+    "win": {
+      "icon": "icons/icon.ico",
+      "target": [
+        { "target": "nsis", "arch": ["x64"] },
+        { "target": "portable", "arch": ["x64"] }
+      ]
+    },
+    "nsis": {
+      "artifactName": "ZAT-POS-Setup-${version}.${ext}",
+      "createDesktopShortcut": "always",
+      "shortcutName": "ZAT POS"
+    },
+    "linux": {
+      "icon": "icons/icon.png",
+      "category": "Office"
+    }
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^6.0.0",
+    "@capacitor/android": "^6.0.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0"
+  },
+  "dependencies": {
+    "@capacitor/core": "^6.0.0",
+    "@capacitor/browser": "^6.0.0",
+    "@capacitor/app": "^6.0.0",
+    "@capacitor/device": "^6.0.0",
+    "@capacitor/network": "^6.0.0",
+    "@capacitor/filesystem": "^6.0.0"
+  }
+}
