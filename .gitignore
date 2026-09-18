@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+package-lock.json.bak
+
+# Build output
+dist/
+build/
+*.apk
+*.aab
+
+# Electron/Capacitor generated
+android/.gradle/
+android/build/
+android/local.properties
+android/gradle-*-all.zip
+android/capacitor-cordova-android-plugins/
+android/app/build/
+android/app/src/main/assets/public/
+android/app/src/main/assets/offline-pos/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+android/app/src/main/res/xml/config.xml
+android/.idea/
+android/.externalNativeBuild/
+android/.cxx/
+android/*.iml
+
+# IDE / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
