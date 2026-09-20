@@ -49,7 +49,7 @@ createApp({
         // ── Mobile (Android) UI + printer picker ───────────────────────────────
         // Additive-only: none of this is referenced by the desktop template.
         const mobileCartOpen             = ref(false);
-        const mobileProductViewMode      = ref('grid');    // 'grid' | 'list'
+        const mobileProductViewMode      = ref('list');    // 'grid' | 'list'
         const bluetoothPrinters          = ref([]);       // [{ name, address }]
         const isScanningBluetoothPrinters = ref(false);
         const selectedBluetoothPrinterInfo = ref(null);    // { name, address } | null
@@ -129,7 +129,12 @@ createApp({
         const showDiscountModal     = ref(false);
         const showLineEditModal     = ref(false);
         const showSyncPanel         = ref(false);
-        const showSettings          = ref(false);
+        const showSettings          = computed({
+            get: () => currentPage.value === 'settings',
+            set: (v) => { if (!v && currentPage.value === 'settings') currentPage.value = 'pos'; }
+        });
+        const sideNavCollapsed      = ref(true);
+        const productsReady         = ref(false);
         const showBrandDrawer       = ref(false);
 
         // ── App update check ─────────────────────────────────────────────────
@@ -516,7 +521,7 @@ createApp({
             const u = cfg.user;
             if (u && typeof u === 'object') {
                 const joined = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
-                name = (u.name || u.username || u.user_name || joined || '').trim();
+                name = (joined || u.name || u.username || u.user_name || '').trim();
             }
             if (!name) name = String(cfg.user_name || cfg.cashier_name || cfg.cashier || '').trim();
             if (!name) return;
@@ -1937,7 +1942,7 @@ createApp({
             }
             await db.held_sales.delete(held.id);
             await loadHeldSales();
-            showHeldSalesModal.value = false;
+            currentPage.value = 'pos';
             toast(t('sale_resumed'), 'success');
         };
 
@@ -4225,6 +4230,7 @@ createApp({
                 await refreshCashRegisterPermissions();
             }
             products.value  = await db.products.toArray();
+            productsReady.value = true;
             await refreshCustomerList();
             await loadSales();
             await loadHeldSales();
@@ -4422,7 +4428,7 @@ createApp({
             currentPage, productSearch, selectedCategory, selectedBrand,
             showProductSuggestion, showCustomerDropdown,
             showPaymentModal, showDiscountModal, showLineEditModal,
-            showSyncPanel, showSettings, showBrandDrawer,
+            showSyncPanel, showSettings, showBrandDrawer, sideNavCollapsed, productsReady,
             showHeldSalesModal, showOrderConfigStrip,
             showClearCartConfirmModal,
             showCloseRegisterControl,
