@@ -147,6 +147,8 @@
             border-radius: 20px 20px 20px 6px !important;
         }
         .m-product-card:active { transform: scale(0.97); box-shadow: 0 4px 14px rgba(245,158,11,.18); border-color: var(--z-gold-l) !important; }
+        .m-product-row { transition: transform .12s ease, box-shadow .12s ease; }
+        .m-product-row:active { transform: scale(0.98); box-shadow: 0 4px 14px rgba(245,158,11,.18) !important; }
         .m-product-card::after {
             content: ''; position: absolute; top: 0; inset-inline-start: 0;
             width: 26px; height: 4px; border-radius: 0 0 6px 0;
@@ -380,7 +382,7 @@
             <div v-else class="space-y-2">
                 <div :style="{ height: mListTopPad + 'px' }"></div>
                 <div v-for="p in mListVisibleProducts" :key="p.id" @click="addToCart(p)"
-                    class="relative bg-white rounded-xl cursor-pointer px-3 py-2 flex items-center gap-3"
+                    class="m-product-row relative bg-white rounded-xl cursor-pointer px-3 py-2 flex items-center gap-3"
                     style="box-shadow:0 1px 3px rgba(12,26,46,.07), 0 1px 2px rgba(12,26,46,.04);">
                     <div class="w-10 h-10 rounded-lg overflow-hidden bg-slate-50 flex items-center justify-center flex-shrink-0">
                         <img v-if="p.image" :src="p.image" class="w-full h-full object-cover" @error="p.image = null">
