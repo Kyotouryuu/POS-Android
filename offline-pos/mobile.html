@@ -546,25 +546,88 @@
             <!-- Server / sync -->
             <section class="space-y-3">
                 <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_server_section') }}</div>
-                <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('server_url') }}</label>
-                    <input type="text" v-model="settings.serverUrl" class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50" placeholder="https://your-server.com">
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('api_key') }}</label>
-                    <input type="password" v-model="settings.apiKey" class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50" :placeholder="t('api_key_placeholder')">
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('location') }}</label>
-                    <select v-model="settings.locationId" class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50">
-                        <option value="">{{ t('select_location') }}</option>
-                        <option v-for="loc in locations" :key="loc.id" :value="loc.id">{{ loc.name }}</option>
-                    </select>
-                    <button v-if="settings.serverUrl && settings.apiKey" @click="loadLocations" class="mt-1.5 text-xs text-amber-500 font-medium flex items-center gap-1">
-                        <i class="fas fa-rotate text-[10px]"></i>{{ t('refresh_locations') }}
+
+                <!-- Not connected, form hidden -->
+                <template v-if="!settings.apiKey && !showConnectForm">
+                    <button @click="openConnectForm" class="w-full py-3 m-btn-gold rounded-xl text-sm font-bold flex items-center justify-center gap-2">
+                        <i class="fas fa-plug"></i> {{ t('connect_to_server') }}
                     </button>
-                </div>
-                <button @click="saveSettings" class="w-full py-2.5 m-btn-gold rounded-xl text-sm font-bold">{{ t('save') }}</button>
+                </template>
+
+                <!-- Connected, form hidden -->
+                <template v-else-if="settings.apiKey && !showConnectForm">
+                    <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 space-y-0.5">
+                        <div class="flex items-center gap-2">
+                            <i class="fas fa-circle-check text-emerald-500 text-sm"></i>
+                            <span class="text-sm font-semibold text-emerald-800">{{ t('connected') }}</span>
+                        </div>
+                        <div class="text-xs text-emerald-700 truncate ps-5">{{ cashierDisplayName || '—' }}</div>
+                        <div v-if="settings.serverUrl" dir="ltr" class="text-xs text-emerald-600 truncate ps-5">{{ settings.serverUrl }}</div>
+                    </div>
+                    <button @click="openConnectForm" class="w-full py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600">
+                        {{ t('reconnect') }}
+                    </button>
+                </template>
+
+                <!-- Connect form -->
+                <template v-else>
+                    <!-- Server URL -->
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('server_url') }}</label>
+                        <input type="text" v-model="connectServerUrl" dir="ltr"
+                            class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50"
+                            placeholder="https://your-server.com"
+                            @input="connectPendingToken = ''; connectLocations = []; connectLocationId = ''; connectOtpError = ''">
+                    </div>
+
+                    <!-- 6-box OTP -->
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-2">{{ t('android_otp_label') }}</label>
+                        <div class="flex gap-2 justify-center">
+                            <input v-for="(_, i) in connectOtpDigits" :key="i"
+                                :id="`m-otp-${i}`"
+                                type="text" inputmode="numeric" maxlength="2"
+                                :value="connectOtpDigits[i]"
+                                @input="onOtpDigitInput(i, $event)"
+                                @keydown="onOtpDigitKeydown(i, $event)"
+                                @focus="$event.target.select()"
+                                class="w-11 h-13 border-2 rounded-xl text-center text-xl font-mono font-bold bg-slate-50 focus:outline-none transition-colors"
+                                :class="connectPendingToken ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : connectOtpError ? 'border-red-300' : 'border-slate-200 focus:border-amber-400'">
+                        </div>
+                        <div v-if="connectOtpBusy" class="flex items-center justify-center gap-2 mt-2 text-xs text-slate-500">
+                            <i class="fas fa-spinner fa-spin"></i> {{ t('verifying') }}
+                        </div>
+                        <p v-else-if="connectOtpError" class="text-xs text-red-500 text-center mt-2">{{ connectOtpError }}</p>
+                        <p v-else-if="connectPendingToken" class="text-xs text-emerald-600 text-center mt-2 font-medium">
+                            <i class="fas fa-check-circle"></i> {{ t('otp_verified') }}
+                        </p>
+                        <p v-else class="text-xs text-slate-400 text-center mt-2">{{ t('android_otp_help') }}</p>
+                    </div>
+
+                    <!-- Location (revealed after OTP verified) -->
+                    <div v-if="connectPendingToken">
+                        <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('location') }}</label>
+                        <select v-model="connectLocationId" class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50">
+                            <option value="">{{ t('select_location') }}</option>
+                            <option v-for="loc in connectLocations" :key="loc.id" :value="String(loc.id)">{{ loc.name }}</option>
+                        </select>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex gap-2">
+                        <button v-if="settings.apiKey" @click="showConnectForm = false"
+                            class="flex-1 py-2.5 bg-slate-100 rounded-xl text-sm font-semibold text-slate-600">
+                            {{ t('cancel') }}
+                        </button>
+                        <button @click="saveConnection"
+                            :disabled="!connectPendingToken || !connectLocationId || connectSaveBusy"
+                            :class="connectPendingToken && connectLocationId && !connectSaveBusy ? 'm-btn-gold' : 'bg-slate-200 text-slate-400 cursor-not-allowed'"
+                            class="flex-1 py-2.5 rounded-xl text-sm font-bold">
+                            <i v-if="connectSaveBusy" class="fas fa-spinner fa-spin me-1"></i>
+                            {{ connectSaveBusy ? t('saving') : t('connect') }}
+                        </button>
+                    </div>
+                </template>
             </section>
 
             <!-- Printer picker -->
@@ -612,40 +675,6 @@
                 </div>
             </section>
 
-            <!-- Accounts -->
-            <section class="space-y-2">
-                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('tab_accounts') }}</div>
-                <p class="text-[11px] text-slate-500 leading-relaxed">{{ t('sync_accounts_help') }}</p>
-                <div class="space-y-1.5">
-                    <div v-for="p in profileRegistry.profiles" :key="p.id"
-                        class="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 border text-sm"
-                        :class="p.id === profileRegistry.activeProfileId ? 'border-amber-300 bg-amber-50/80' : 'border-slate-100 bg-slate-50/80'">
-                        <span class="truncate text-slate-800 font-medium">
-                            {{ p.label || (t('account') + ' ' + (p.id === 'default' ? t('default_account') : p.id.slice(-6))) }}
-                        </span>
-                        <button v-if="p.id !== profileRegistry.activeProfileId" type="button"
-                            :disabled="!isOnline || unsyncedForAccountSwitch > 0" @click="openSwitchAccountModal(p.id)"
-                            class="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold border"
-                            :class="(!isOnline || unsyncedForAccountSwitch > 0) ? 'border-slate-100 text-slate-300 cursor-not-allowed bg-slate-50' : 'bg-white border-slate-200 text-amber-700'">
-                            {{ t('switch') }}
-                        </button>
-                        <span v-else class="text-[10px] font-bold text-amber-600 flex-shrink-0">{{ t('active') }}</span>
-                    </div>
-                </div>
-                <div class="flex flex-col gap-2">
-                    <button type="button" :disabled="!settings.serverUrl || !settings.locationId"
-                        @click="addAccountTokenInput = ''; showAddAccountModal = true"
-                        :class="settings.serverUrl && settings.locationId ? 'bg-[var(--z-navy)] text-white' : 'bg-slate-200 text-slate-400 cursor-not-allowed'"
-                        class="py-2.5 rounded-xl text-xs font-bold">+ {{ t('add_account') }}</button>
-                    <button type="button" :disabled="!isOnline || unsyncedForAccountSwitch > 0 || preAccountSwitchBusy" @click="runPreAccountSwitchSync"
-                        :class="(!isOnline || unsyncedForAccountSwitch > 0 || preAccountSwitchBusy) ? 'border-slate-200 text-slate-400 cursor-not-allowed bg-slate-50' : 'border-amber-300 text-amber-800'"
-                        class="py-2.5 rounded-xl text-xs font-bold border">
-                        <span v-if="preAccountSwitchBusy">{{ t('syncing') }}</span><span v-else>{{ t('sync_before_switch') }}</span>
-                    </button>
-                </div>
-                <p v-if="unsyncedForAccountSwitch > 0" class="text-[11px] text-rose-600 font-medium">{{ t('unsynced_before_switch', { count: unsyncedForAccountSwitch }) }}</p>
-                <p v-if="!isOnline" class="text-[11px] text-amber-700 font-medium">{{ t('offline_switch_notice') }}</p>
-            </section>
 
             <!-- Diagnostics -->
             <section class="space-y-2">
@@ -1943,37 +1972,6 @@
     </div>
 
 
-    <!-- ══════════════════════════════════════════════
-         ADD ACCOUNT SHEET
-    ══════════════════════════════════════════════ -->
-    <div v-if="showAddAccountModal" class="fixed inset-0 z-[60] modal-backdrop flex items-end" @click.self="showAddAccountModal = false" :dir="dir">
-        <div class="bg-white rounded-t-3xl w-full p-6 space-y-3" style="padding-bottom: max(24px, env(safe-area-inset-bottom));">
-            <div class="w-10 h-1.5 bg-slate-200 rounded-full mx-auto mb-1"></div>
-            <h3 class="font-bold text-slate-800 text-sm">{{ t('add_cashier_account') }}</h3>
-            <p class="text-xs text-slate-600 leading-relaxed">{{ t('add_account_help') }}</p>
-            <div>
-                <span class="block text-[11px] font-semibold text-slate-500 mb-1">{{ t('server_url_readonly') }}</span>
-                <div dir="ltr" class="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono bg-slate-100 text-slate-700 truncate">{{ settings.serverUrl || '—' }}</div>
-            </div>
-            <div>
-                <span class="block text-[11px] font-semibold text-slate-500 mb-1">{{ t('location_readonly') }}</span>
-                <div class="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs bg-slate-100 text-slate-700 truncate">
-                    {{ (locations.find(l => String(l.id) === String(settings.locationId)) || {}).name || settings.locationId }}
-                </div>
-            </div>
-            <div>
-                <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('new_account_sync_token') }}</label>
-                <input v-model="addAccountTokenInput" type="password" dir="ltr" autocomplete="off"
-                    class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-mono bg-slate-50" :placeholder="t('paste_token_only')" @keyup.enter="addAccountFromEnvSnippet">
-            </div>
-            <div class="flex gap-2 pt-1">
-                <button @click="showAddAccountModal = false" class="flex-1 py-3 bg-slate-100 rounded-xl text-sm font-semibold text-slate-700">{{ t('cancel') }}</button>
-                <button @click="addAccountFromEnvSnippet" :disabled="!settings.serverUrl || !settings.locationId"
-                    :class="settings.serverUrl && settings.locationId ? 'm-btn-gold' : 'bg-slate-200 text-slate-400 cursor-not-allowed'"
-                    class="flex-1 py-3 rounded-xl text-sm font-bold">{{ t('add_and_switch') }}</button>
-            </div>
-        </div>
-    </div>
 
 
     <!-- ══════════════════════════════════════════════

@@ -38,10 +38,10 @@ npm install
 ## 2. Run the desktop app (Electron)
 
 ```bash
-npm start
+npm run start:win
 ```
 
-This opens `offline-pos/index.html` in an Electron window.
+This opens `offline-pos/index.html` in an Electron window. `npm start` no longer launches a platform; pick `start:win` or `start:android`.
 
 ## 3. Run in a browser (quick preview)
 
@@ -60,14 +60,16 @@ Then open `http://localhost:8080/index.html` (desktop UI) or `http://localhost:8
 The `android/` folder is a Capacitor project. Some files inside it (native build caches, the Gradle wrapper download, and copies of the web assets) are generated automatically and are **not** committed — you regenerate them locally before building.
 
 ```bash
-# 1. Sync the web app into the native Android project
-npx cap sync android
+# Sync web assets, build, and install on a connected device/emulator
+# (does not open Electron)
+npm run start:android
 
-# 2. Open in Android Studio to run on a device/emulator
+#    ...or open Android Studio
 npx cap open android
 
-#    ...or build a debug APK from the command line
-npm run cap:build
+#    ...or build a debug APK from the command line (Windows)
+cd android
+.\gradlew.bat assembleDebug
 ```
 
 By default Capacitor loads `offline-pos` as configured in `capacitor.config.ts` (`webDir: "offline-pos"`); the Android shell serves `mobile.html`-driven navigation for the phone UI.

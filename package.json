@@ -4,15 +4,18 @@
   "description": "ZAT POS - Offline Desktop App",
   "main": "main.js",
   "scripts": {
-    "start": "electron .",
+    "start": "node -e \"console.log('\\n  npm run start:win       Electron (Windows desktop)\\n  npm run start:android   phone/emulator (no Electron)\\n'); process.exit(1)\"",
+    "start:win": "electron .",
+    "start:android": "npx cap sync android && npx cap run android",
+    "start:web": "npx serve offline-pos",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
     "build:linux": "electron-builder --linux",
     "cap:open": "npx cap open android",
     "cap:sync": "npx cap sync android",
     "cap:copy": "npx cap copy android",
-    "cap:build": "cd android && ./gradlew assembleDebug",
-    "cap:release": "cd android && ./gradlew assembleRelease"
+    "cap:build": "node -e \"process.exit(require('child_process').spawnSync(process.platform==='win32'?'gradlew.bat':'./gradlew',['assembleDebug'],{cwd:'android',stdio:'inherit',shell:true}).status)\"",
+    "cap:release": "node -e \"process.exit(require('child_process').spawnSync(process.platform==='win32'?'gradlew.bat':'./gradlew',['assembleRelease'],{cwd:'android',stdio:'inherit',shell:true}).status)\""
   },
   "build": {
     "appId": "com.zat.pos",
