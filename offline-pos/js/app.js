@@ -125,6 +125,7 @@ createApp({
         const selectedBrand         = ref(null);
         const showProductSuggestion = ref(false);
         const showCustomerDropdown  = ref(false);
+        const scannerActive         = ref(false);
         const showPaymentModal      = ref(false);
         const showDiscountModal     = ref(false);
         const showLineEditModal     = ref(false);
@@ -352,7 +353,7 @@ createApp({
 
         // Mobile connect form
         const showConnectForm        = ref(false);
-        const connectServerUrl       = ref('');
+        const connectServerUrl       = ref('https://zaterp.com');
         const connectOtpDigits       = ref(['', '', '', '', '', '']);
         const connectOtpBusy         = ref(false);
         const connectOtpError        = ref('');
@@ -1376,6 +1377,38 @@ createApp({
         const focusSearch = () => {
             productSearch.value = '';
             nextTick(() => searchInput.value?.focus());
+        };
+
+        const cancelCameraBarcodeScan = async () => {
+            try { await window.Capacitor?.Plugins?.BarcodeScanner?.stopScan(); } catch (_) {}
+            scannerActive.value = false;
+            document.body.classList.remove('barcode-scanner-active');
+        };
+
+        const startCameraBarcodeScan = async () => {
+            const BS = window.Capacitor?.Plugins?.BarcodeScanner;
+            if (!BS) { focusSearch(); return; }
+            try {
+                const status = await BS.checkPermission({ force: true });
+                if (!status.granted) return;
+                scannerActive.value = true;
+                document.body.classList.add('barcode-scanner-active');
+                const result = await BS.startScan();
+                scannerActive.value = false;
+                document.body.classList.remove('barcode-scanner-active');
+                if (result.hasContent) {
+                    productSearch.value = result.content.trim();
+                    tryAutoAddScannedProduct();
+                    if (productSearch.value) {
+                        manualSearchQuery.value = productSearch.value;
+                        productSearch.value = '';
+                        showManualSearchModal.value = true;
+                    }
+                }
+            } catch (_) {
+                scannerActive.value = false;
+                document.body.classList.remove('barcode-scanner-active');
+            }
         };
 
         const refocusSearch = () => {
@@ -2896,7 +2929,7 @@ createApp({
         };
 
         const openConnectForm = () => {
-            connectServerUrl.value = String(settings.value.serverUrl || '').trim();
+            connectServerUrl.value = String(settings.value.serverUrl || 'https://zaterp.com').trim();
             resetConnectForm();
             showConnectForm.value = true;
         };
@@ -4710,6 +4743,7 @@ createApp({
             fmt, fmtDate,
             // Methods
             addToCart, updateQty, removeFromCart, clearCart, resetCart, addFirstSearchResult, focusSearch,
+            startCameraBarcodeScan, cancelCameraBarcodeScan, scannerActive,
             confirmClearCart,
             onPrimarySearchInput,
             selectCustomer, clearCustomer,

@@ -41,19 +41,16 @@ npm install
 npm run start:win
 ```
 
-This opens `offline-pos/index.html` in an Electron window. `npm start` no longer launches a platform; pick `start:win` or `start:android`.
+This opens `offline-pos/index.html` in an Electron window (`npm start` does the same).
 
 ## 3. Run in a browser (quick preview)
 
-Since the app uses a service worker and relative fetches, serve the folder instead of opening the HTML file directly:
+Since the app uses a service worker and relative fetches, serve the folder instead of opening the HTML file directly. Use a separate command so the desktop UI is not opened by default:
 
 ```bash
-npx serve offline-pos
-# or
-python -m http.server 8080 --directory offline-pos
+npm run preview:win       # desktop UI  → http://127.0.0.1:4173/index.html
+npm run preview:android   # mobile UI   → http://127.0.0.1:4174/mobile.html
 ```
-
-Then open `http://localhost:8080/index.html` (desktop UI) or `http://localhost:8080/mobile.html` (mobile UI) in your browser.
 
 ## 4. Run the mobile app (Android)
 
