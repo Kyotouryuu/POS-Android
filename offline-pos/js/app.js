@@ -49,7 +49,7 @@ createApp({
         // ── Mobile (Android) UI + printer picker ───────────────────────────────
         // Additive-only: none of this is referenced by the desktop template.
         const mobileCartOpen             = ref(false);
-        const mobileProductViewMode      = ref('grid');    // 'grid' | 'list'
+        const mobileProductViewMode      = ref('list');    // 'grid' | 'list'
         const bluetoothPrinters          = ref([]);       // [{ name, address }]
         const isScanningBluetoothPrinters = ref(false);
         const selectedBluetoothPrinterInfo = ref(null);    // { name, address } | null
@@ -125,11 +125,17 @@ createApp({
         const selectedBrand         = ref(null);
         const showProductSuggestion = ref(false);
         const showCustomerDropdown  = ref(false);
+        const scannerActive         = ref(false);
         const showPaymentModal      = ref(false);
         const showDiscountModal     = ref(false);
         const showLineEditModal     = ref(false);
         const showSyncPanel         = ref(false);
-        const showSettings          = ref(false);
+        const showSettings          = computed({
+            get: () => currentPage.value === 'settings',
+            set: (v) => { if (!v && currentPage.value === 'settings') currentPage.value = 'pos'; }
+        });
+        const sideNavCollapsed      = ref(true);
+        const productsReady         = ref(false);
         const showBrandDrawer       = ref(false);
 
         // ── App update check ─────────────────────────────────────────────────
@@ -340,7 +346,21 @@ createApp({
 
         const showAddAccountModal = ref(false);
         const addAccountTokenInput = ref('');
+        const addAccountOtpInput   = ref('');
+        const addAccountOtpBusy    = ref(false);
+        const addAccountOtpError   = ref('');
         const preAccountSwitchBusy = ref(false);
+
+        // Mobile connect form
+        const showConnectForm        = ref(false);
+        const connectServerUrl       = ref('https://zaterp.com');
+        const connectOtpDigits       = ref(['', '', '', '', '', '']);
+        const connectOtpBusy         = ref(false);
+        const connectOtpError        = ref('');
+        const connectPendingToken    = ref('');
+        const connectLocations       = ref([]);
+        const connectLocationId      = ref('');
+        const connectSaveBusy        = ref(false);
 
         const showSwitchAccountModal = ref(false);
         const switchAccountTargetId  = ref('');
@@ -516,7 +536,7 @@ createApp({
             const u = cfg.user;
             if (u && typeof u === 'object') {
                 const joined = [u.first_name, u.last_name].filter(Boolean).join(' ').trim();
-                name = (u.name || u.username || u.user_name || joined || '').trim();
+                name = (joined || u.name || u.username || u.user_name || '').trim();
             }
             if (!name) name = String(cfg.user_name || cfg.cashier_name || cfg.cashier || '').trim();
             if (!name) return;
@@ -706,6 +726,14 @@ createApp({
         const blockSaleIfRegisterClosed = () => {
             if (hasOpenRegister.value !== false) return false;
             openOpenRegisterFlow({ silentIfBusy: true, force: true });
+            return true;
+        };
+
+        // Phase 2 ZATCA businesses must be online to place or return orders.
+        const blockSaleIfPhase2Offline = () => {
+            if ((sublocation.value?.zatca_phase ?? 1) !== 2) return false;
+            if (isOnline.value) return false;
+            toast(t('phase2_requires_online'), 'error', 6000);
             return true;
         };
 
@@ -1351,6 +1379,38 @@ createApp({
             nextTick(() => searchInput.value?.focus());
         };
 
+        const cancelCameraBarcodeScan = async () => {
+            try { await window.Capacitor?.Plugins?.BarcodeScanner?.stopScan(); } catch (_) {}
+            scannerActive.value = false;
+            document.body.classList.remove('barcode-scanner-active');
+        };
+
+        const startCameraBarcodeScan = async () => {
+            const BS = window.Capacitor?.Plugins?.BarcodeScanner;
+            if (!BS) { focusSearch(); return; }
+            try {
+                const status = await BS.checkPermission({ force: true });
+                if (!status.granted) return;
+                scannerActive.value = true;
+                document.body.classList.add('barcode-scanner-active');
+                const result = await BS.startScan();
+                scannerActive.value = false;
+                document.body.classList.remove('barcode-scanner-active');
+                if (result.hasContent) {
+                    productSearch.value = result.content.trim();
+                    tryAutoAddScannedProduct();
+                    if (productSearch.value) {
+                        manualSearchQuery.value = productSearch.value;
+                        productSearch.value = '';
+                        showManualSearchModal.value = true;
+                    }
+                }
+            } catch (_) {
+                scannerActive.value = false;
+                document.body.classList.remove('barcode-scanner-active');
+            }
+        };
+
         const refocusSearch = () => {
             nextTick(() => searchInput.value?.focus());
         };
@@ -1937,7 +1997,7 @@ createApp({
             }
             await db.held_sales.delete(held.id);
             await loadHeldSales();
-            showHeldSalesModal.value = false;
+            currentPage.value = 'pos';
             toast(t('sale_resumed'), 'success');
         };
 
@@ -2139,10 +2199,12 @@ createApp({
             if (!cart.value.length) return;
             if (!settings.value.locationId) { toast(t('select_location_first_error'), 'error'); return; }
             if (blockSaleIfRegisterClosed()) return;
+            if (blockSaleIfPhase2Offline()) return;
             const tx = await buildFinalTransaction([{ method: 'cash', amount: grandTotal.value }]);
             await saveTransaction(tx);
             toast(t('sale_saved'), 'success');
             printReceipt(lastReceipt.value, { silent: true });
+            if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
         };
 
         // Express Card
@@ -2150,10 +2212,12 @@ createApp({
             if (!cart.value.length) return;
             if (!settings.value.locationId) { toast(t('select_location_first_error'), 'error'); return; }
             if (blockSaleIfRegisterClosed()) return;
+            if (blockSaleIfPhase2Offline()) return;
             const tx = await buildFinalTransaction([{ method: 'card', amount: grandTotal.value }]);
             await saveTransaction(tx);
             toast(t('sale_saved_card'), 'success');
             printReceipt(lastReceipt.value, { silent: true });
+            if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
         };
 
         // Credit Sale (due)
@@ -2161,11 +2225,13 @@ createApp({
             if (!cart.value.length) return;
             if (!settings.value.locationId) { toast(t('select_location_first_error'), 'error'); return; }
             if (blockSaleIfRegisterClosed()) return;
+            if (blockSaleIfPhase2Offline()) return;
             const tx = await buildFinalTransaction([]);
             tx.payment_status = 'due';
             await saveTransaction(tx);
             toast(t('sale_saved_credit'), 'success');
             printReceipt(lastReceipt.value, { silent: true });
+            if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
         };
 
         // Save as draft or quotation (bypasses payment modal)
@@ -2174,12 +2240,14 @@ createApp({
         const saveSale = async (status) => {
             if (!cart.value.length) return;
             if (!settings.value.locationId) { toast(t('select_location_first_error'), 'error'); return; }
+            if (blockSaleIfPhase2Offline()) return;
             saleStatus.value = status;
             const tx = await buildTransaction([]);
             tx.payment_status = 'due';
             await saveTransaction(tx); // resetCart() resets saleStatus to 'final'
             const label = status === 'draft' ? t('label_draft') : t('label_quotation');
             toast(t('saved_label', { label }), 'success');
+            if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
         };
 
         // Process payment from modal — always final regardless of status pill
@@ -2192,11 +2260,13 @@ createApp({
                 openOpenRegisterFlow({ silentIfBusy: true, force: true });
                 return;
             }
+            if (blockSaleIfPhase2Offline()) return;
             const tx = await buildFinalTransaction(payments.value);
             await saveTransaction(tx);
             showPaymentModal.value = false;
             toast(t('payment_completed'), 'success');
             printReceipt(lastReceipt.value, { silent: true });
+            if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
         };
 
         // ════════════════════════════════════════════════════════════════════
@@ -2318,6 +2388,7 @@ createApp({
         const saveReturn = async () => {
             const items = returnItems.value.filter(i => (parseFloat(i.return_qty) || 0) > 0);
             if (!items.length) { toast(t('select_return_qty'), 'error'); return; }
+            if (blockSaleIfPhase2Offline()) return;
             const sale  = returningFromSale.value;
             const total = returnTotal.value;
             const rec = {
@@ -2337,6 +2408,7 @@ createApp({
             returningFromSale.value = null;
             returnItems.value       = [];
             toast(t('return_saved'), 'success');
+            if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
         };
 
         // ════════════════════════════════════════════════════════════════════
@@ -2844,6 +2916,114 @@ createApp({
                     : t('settings_saved'),
                 'success',
             );
+        };
+
+        // ── Mobile connect form helpers ──────────────────────────────────────
+
+        const resetConnectForm = () => {
+            connectOtpDigits.value    = ['', '', '', '', '', ''];
+            connectOtpError.value     = '';
+            connectPendingToken.value = '';
+            connectLocations.value    = [];
+            connectLocationId.value   = '';
+        };
+
+        const openConnectForm = () => {
+            connectServerUrl.value = String(settings.value.serverUrl || 'https://zaterp.com').trim();
+            resetConnectForm();
+            showConnectForm.value = true;
+        };
+
+        const redeemConnectOtp = async () => {
+            const serverUrl = String(connectServerUrl.value || '').trim().replace(/\/+$/, '');
+            const otp = connectOtpDigits.value.join('');
+            if (otp.length !== 6) return;
+            if (!serverUrl) {
+                connectOtpError.value = t('save_server_url_first');
+                return;
+            }
+            connectOtpBusy.value     = true;
+            connectOtpError.value    = '';
+            connectPendingToken.value = '';
+            connectLocations.value   = [];
+            try {
+                const res  = await fetch(`${serverUrl}/api/sync/redeem-otp`, {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body:    JSON.stringify({ otp_code: otp }),
+                });
+                const data = await res.json().catch(() => ({}));
+                if (!res.ok) {
+                    connectOtpError.value = (data.code === 'invalid_or_expired_otp')
+                        ? t('otp_invalid_or_expired')
+                        : (data.message || t('otp_redeem_failed'));
+                    connectOtpDigits.value = ['', '', '', '', '', ''];
+                    document.getElementById('m-otp-0')?.focus();
+                    return;
+                }
+                const token = String(data.token || '').trim();
+                if (!token) { connectOtpError.value = t('otp_redeem_failed'); return; }
+                connectPendingToken.value = token;
+                try {
+                    const cfgRes = await fetch(`${serverUrl}/api/sync/config`, {
+                        headers: { 'Authorization': `Bearer ${token}`, 'Accept': 'application/json' },
+                    });
+                    if (cfgRes.ok) {
+                        const cfg = await cfgRes.json();
+                        connectLocations.value = cfg.business_locations || [];
+                        if (connectLocations.value.length === 1) {
+                            connectLocationId.value = String(connectLocations.value[0].id);
+                        }
+                    }
+                } catch { /* locations will stay empty */ }
+            } catch {
+                connectOtpError.value = t('otp_redeem_failed');
+            } finally {
+                connectOtpBusy.value = false;
+            }
+        };
+
+        const onOtpDigitInput = (index, event) => {
+            // Handle paste of full code into any box
+            const pasted = event.target.value;
+            if (pasted.length > 1) {
+                const digits = pasted.replace(/\D/g, '').slice(0, 6).split('');
+                digits.forEach((d, i) => { connectOtpDigits.value[i] = d; });
+                event.target.value = connectOtpDigits.value[index] || '';
+                const next = Math.min(digits.length, 5);
+                document.getElementById(`m-otp-${next}`)?.focus();
+                if (connectOtpDigits.value.join('').length === 6) redeemConnectOtp();
+                return;
+            }
+            const val = pasted.replace(/\D/g, '').slice(-1);
+            connectOtpDigits.value[index] = val;
+            event.target.value = val;
+            if (val && index < 5) {
+                document.getElementById(`m-otp-${index + 1}`)?.focus();
+            }
+            if (connectOtpDigits.value.join('').length === 6) redeemConnectOtp();
+        };
+
+        const onOtpDigitKeydown = (index, event) => {
+            if (event.key === 'Backspace' && !connectOtpDigits.value[index] && index > 0) {
+                document.getElementById(`m-otp-${index - 1}`)?.focus();
+            }
+        };
+
+        const saveConnection = async () => {
+            if (!connectPendingToken.value) { toast(t('enter_6_digit_otp'), 'error'); return; }
+            if (!connectLocationId.value)   { toast(t('select_location_first_error'), 'error'); return; }
+            connectSaveBusy.value = true;
+            settings.value.serverUrl  = String(connectServerUrl.value).trim().replace(/\/+$/, '');
+            settings.value.apiKey     = connectPendingToken.value;
+            settings.value.locationId = connectLocationId.value;
+            try {
+                await saveSettings();
+                showConnectForm.value = false;
+                resetConnectForm();
+            } finally {
+                connectSaveBusy.value = false;
+            }
         };
 
         // ════════════════════════════════════════════════════════════════════
@@ -3830,6 +4010,91 @@ createApp({
             toast(t('account_added_switched'), 'success');
         };
 
+        const addAccountFromOtp = async () => {
+            const serverUrl = String(settings.value.serverUrl || '').trim().replace(/\/+$/, '');
+            const sharedLocationId = String(settings.value.locationId || '').trim();
+            const otpCode = String(addAccountOtpInput.value || '').replace(/\s/g, '');
+
+            if (!serverUrl) {
+                toast(t('save_server_url_first'), 'error');
+                return;
+            }
+            if (!sharedLocationId) {
+                toast(t('select_location_before_account'), 'error', 7000);
+                return;
+            }
+            if (!otpCode || otpCode.length !== 6) {
+                addAccountOtpError.value = t('enter_6_digit_otp');
+                return;
+            }
+
+            addAccountOtpBusy.value  = true;
+            addAccountOtpError.value = '';
+            try {
+                const res = await fetch(`${serverUrl}/api/sync/redeem-otp`, {
+                    method:  'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body:    JSON.stringify({ otp_code: otpCode }),
+                });
+                const data = await res.json().catch(() => ({}));
+
+                if (!res.ok) {
+                    const code = data.code || '';
+                    addAccountOtpError.value = code === 'invalid_or_expired_otp'
+                        ? t('otp_invalid_or_expired')
+                        : (data.message || t('otp_redeem_failed'));
+                    return;
+                }
+
+                const apiKey = String(data.token || '').trim();
+                if (!apiKey) {
+                    addAccountOtpError.value = t('otp_redeem_failed');
+                    return;
+                }
+
+                const newId = newProfileId();
+                const reg = {
+                    ...profileRegistry.value,
+                    profiles: [...profileRegistry.value.profiles, { id: newId, label: null }],
+                    activeProfileId: newId,
+                };
+                saveProfileRegistry(reg);
+                profileRegistry.value = reg;
+                try { await db.close(); } catch { /* ignore */ }
+                db = openOfflineProfileDb(newId);
+                await db.open();
+                settings.value = { serverUrl, apiKey, locationId: sharedLocationId };
+                cashierDisplayName.value = '';
+                syncTokenExpiresAt.value = null;
+                await persistConfig();
+                addAccountOtpInput.value  = '';
+                showAddAccountModal.value = false;
+                showSettings.value        = false;
+                await afterProfileDbChange();
+                if (isOnline.value) {
+                    try {
+                        const cfgPath = '/api/sync/config' + (settings.value.locationId
+                            ? '?location_id=' + encodeURIComponent(settings.value.locationId)
+                            : '');
+                        const cfg = await apiGet(cfgPath);
+                        await applySublocationFromConfig(cfg);
+                        await applyTokenExpiryFromConfig(cfg);
+                        await applyCashierFromConfig(cfg);
+                        await persistConfig();
+                    } catch (e) {
+                        toast(t('account_saved_locally_settings_fail', { error: e.message }), 'warn', 6000);
+                    }
+                }
+                await refreshCashRegisterPermissions();
+                restartAutoSyncScheduler();
+                toast(t('account_added_switched'), 'success');
+            } catch (e) {
+                addAccountOtpError.value = t('otp_redeem_failed');
+            } finally {
+                addAccountOtpBusy.value = false;
+            }
+        };
+
         const pushSales = async () => {
             if (!requireSync()) return;
             if (pushingSales.value) return;
@@ -4225,6 +4490,7 @@ createApp({
                 await refreshCashRegisterPermissions();
             }
             products.value  = await db.products.toArray();
+            productsReady.value = true;
             await refreshCustomerList();
             await loadSales();
             await loadHeldSales();
@@ -4422,7 +4688,7 @@ createApp({
             currentPage, productSearch, selectedCategory, selectedBrand,
             showProductSuggestion, showCustomerDropdown,
             showPaymentModal, showDiscountModal, showLineEditModal,
-            showSyncPanel, showSettings, showBrandDrawer,
+            showSyncPanel, showSettings, showBrandDrawer, sideNavCollapsed, productsReady,
             showHeldSalesModal, showOrderConfigStrip,
             showClearCartConfirmModal,
             showCloseRegisterControl,
@@ -4460,6 +4726,10 @@ createApp({
             lang, dir, t, setLang,
             profileRegistry, cashierDisplayName, activeProfileEntry, currentLocationName, unsyncedForAccountSwitch,
             showAddAccountModal, addAccountTokenInput, preAccountSwitchBusy,
+            addAccountOtpInput, addAccountOtpBusy, addAccountOtpError, addAccountFromOtp,
+            showConnectForm, connectServerUrl, connectOtpDigits, connectOtpBusy, connectOtpError,
+            connectPendingToken, connectLocations, connectLocationId, connectSaveBusy,
+            openConnectForm, onOtpDigitInput, onOtpDigitKeydown, saveConnection,
             // Computed
             displayProducts, filteredProducts, filteredCustomers, manualSearchResults,
             pricedProducts, recentSalesForTab,
@@ -4473,6 +4743,7 @@ createApp({
             fmt, fmtDate,
             // Methods
             addToCart, updateQty, removeFromCart, clearCart, resetCart, addFirstSearchResult, focusSearch,
+            startCameraBarcodeScan, cancelCameraBarcodeScan, scannerActive,
             confirmClearCart,
             onPrimarySearchInput,
             selectCustomer, clearCustomer,

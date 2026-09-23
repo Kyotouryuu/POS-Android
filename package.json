@@ -5,14 +5,18 @@
   "main": "main.js",
   "scripts": {
     "start": "electron .",
+    "start:win": "electron .",
+    "start:android": "npx cap sync android && npx cap run android",
+    "preview:win": "node scripts/preview.js win",
+    "preview:android": "node scripts/preview.js android",
     "build:mac": "electron-builder --mac",
     "build:win": "electron-builder --win",
     "build:linux": "electron-builder --linux",
     "cap:open": "npx cap open android",
     "cap:sync": "npx cap sync android",
     "cap:copy": "npx cap copy android",
-    "cap:build": "cd android && ./gradlew assembleDebug",
-    "cap:release": "cd android && ./gradlew assembleRelease"
+    "cap:build": "node -e \"process.exit(require('child_process').spawnSync(process.platform==='win32'?'gradlew.bat':'./gradlew',['assembleDebug'],{cwd:'android',stdio:'inherit',shell:true}).status)\"",
+    "cap:release": "node -e \"process.exit(require('child_process').spawnSync(process.platform==='win32'?'gradlew.bat':'./gradlew',['assembleRelease'],{cwd:'android',stdio:'inherit',shell:true}).status)\""
   },
   "build": {
     "appId": "com.zat.pos",
@@ -42,8 +46,18 @@
     "win": {
       "icon": "icons/icon.ico",
       "target": [
-        { "target": "nsis", "arch": ["x64"] },
-        { "target": "portable", "arch": ["x64"] }
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
       ]
     },
     "nsis": {
@@ -57,17 +71,18 @@
     }
   },
   "devDependencies": {
-    "@capacitor/cli": "^6.0.0",
     "@capacitor/android": "^6.0.0",
+    "@capacitor/cli": "^6.0.0",
     "electron": "^33.0.0",
     "electron-builder": "^25.0.0"
   },
   "dependencies": {
-    "@capacitor/core": "^6.0.0",
-    "@capacitor/browser": "^6.0.0",
+    "@capacitor-community/barcode-scanner": "^4.0.1",
     "@capacitor/app": "^6.0.0",
+    "@capacitor/browser": "^6.0.0",
+    "@capacitor/core": "^6.0.0",
     "@capacitor/device": "^6.0.0",
-    "@capacitor/network": "^6.0.0",
-    "@capacitor/filesystem": "^6.0.0"
+    "@capacitor/filesystem": "^6.0.0",
+    "@capacitor/network": "^6.0.0"
   }
 }

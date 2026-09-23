@@ -2,7 +2,7 @@
 <html lang="ar" dir="rtl">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, maximum-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.3, viewport-fit=cover, maximum-scale=3.0, user-scalable=no">
     <meta http-equiv="Content-Language" content="ar">
     <script>
         // Restore persisted language before Vue mounts to avoid a direction flash on load.
@@ -54,23 +54,74 @@
             background: #f8fafc;
             padding-top: env(safe-area-inset-top);
         }
+        .m-body { display: flex; flex: 1; overflow: hidden; }
         .m-topbar { padding-top: max(10px, env(safe-area-inset-top)); }
         .m-header-navy { background: linear-gradient(150deg, var(--z-navy) 0%, var(--z-navy3) 65%, var(--z-navy4) 100%); }
-        .m-bottom-nav { padding-bottom: max(6px, env(safe-area-inset-bottom)); background: linear-gradient(150deg, var(--z-navy) 0%, var(--z-navy2) 100%); }
-        .m-cart-fab-wrap { bottom: calc(64px + env(safe-area-inset-bottom) + 10px); }
-        .m-nav-item { position: relative; color: rgba(255,255,255,0.45); }
+        .m-side-nav {
+            display: flex;
+            flex-direction: column;
+            width: 240px;
+            background: linear-gradient(180deg, var(--z-navy) 0%, var(--z-navy2) 100%);
+            padding-bottom: env(safe-area-inset-bottom);
+            padding-top: env(safe-area-inset-top);
+            transition: transform .25s cubic-bezier(.4,0,.2,1);
+            overflow: hidden;
+            position: fixed;
+            top: 0;
+            bottom: 0;
+            z-index: 40;
+        }
+        [dir="rtl"] .m-side-nav { right: 0; transform: translateX(0); }
+        [dir="ltr"] .m-side-nav { left: 0; transform: translateX(0); }
+        [dir="rtl"] .m-side-nav.is-collapsed { transform: translateX(100%); }
+        [dir="ltr"] .m-side-nav.is-collapsed { transform: translateX(-100%); }
+        .m-nav-backdrop {
+            position: fixed; inset: 0; z-index: 39;
+            background: rgba(0,0,0,0.45);
+        }
+        .m-nav-backdrop-enter-active, .m-nav-backdrop-leave-active { transition: opacity .25s ease; }
+        .m-nav-backdrop-enter-from, .m-nav-backdrop-leave-to { opacity: 0; }
+        .m-nav-items {
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .m-nav-header {
+            padding: 20px 16px 14px;
+            border-bottom: 1px solid rgba(255,255,255,0.08);
+            flex-shrink: 0;
+            min-width: 240px;
+        }
+        .m-nav-item {
+            position: relative;
+            color: rgba(255,255,255,0.55);
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 0 16px;
+            height: 44px;
+            white-space: nowrap;
+            font-size: 13px;
+            font-weight: 600;
+            min-width: 240px;
+            flex-shrink: 0;
+            transition: color .15s ease, background .15s ease;
+        }
+        .m-nav-item:active { background: rgba(255,255,255,0.05); }
+        .m-nav-icon { font-size: 15px; width: 18px; text-align: center; flex-shrink: 0; }
+        .m-cart-fab-wrap { bottom: calc(10px + env(safe-area-inset-bottom)); }
         .m-nav-item.is-active { color: var(--z-gold-l); }
         .m-nav-item.is-active::before {
-            content: ''; position: absolute; top: 2px; left: 50%; transform: translateX(-50%);
-            width: 26px; height: 3px; border-radius: 99px;
-            background: linear-gradient(90deg, var(--z-gold), var(--z-gold-l));
+            content: ''; position: absolute; inset-inline-start: 0; top: 50%; transform: translateY(-50%);
+            width: 3px; height: 28px; border-radius: 99px;
+            background: linear-gradient(180deg, var(--z-gold), var(--z-gold-l));
             box-shadow: 0 0 10px rgba(245,158,11,.6);
         }
         .m-nav-item.is-active-emerald { color: #6ee7b7; }
         .m-nav-item.is-active-emerald::before {
-            content: ''; position: absolute; top: 2px; left: 50%; transform: translateX(-50%);
-            width: 26px; height: 3px; border-radius: 99px;
-            background: linear-gradient(90deg, #10b981, #6ee7b7);
+            content: ''; position: absolute; inset-inline-start: 0; top: 50%; transform: translateY(-50%);
+            width: 3px; height: 28px; border-radius: 99px;
+            background: linear-gradient(180deg, #10b981, #6ee7b7);
             box-shadow: 0 0 10px rgba(16,185,129,.6);
         }
         .m-btn-gold {
@@ -96,6 +147,8 @@
             border-radius: 20px 20px 20px 6px !important;
         }
         .m-product-card:active { transform: scale(0.97); box-shadow: 0 4px 14px rgba(245,158,11,.18); border-color: var(--z-gold-l) !important; }
+        .m-product-row { transition: transform .12s ease, box-shadow .12s ease; }
+        .m-product-row:active { transform: scale(0.98); box-shadow: 0 4px 14px rgba(245,158,11,.18) !important; }
         .m-product-card::after {
             content: ''; position: absolute; top: 0; inset-inline-start: 0;
             width: 26px; height: 4px; border-radius: 0 0 6px 0;
@@ -127,6 +180,11 @@
 
         /* Modal backdrop reused from desktop */
         .modal-backdrop { background: rgba(15, 23, 42, 0.55); }
+
+        /* Camera barcode scanner: make WebView transparent, hide app UI */
+        body.barcode-scanner-active { background: transparent !important; }
+        body.barcode-scanner-active #app { visibility: hidden; }
+        body.barcode-scanner-active #barcode-scan-overlay { visibility: visible !important; }
     </style>
 </head>
 <body class="bg-slate-50">
@@ -134,17 +192,17 @@
 
     <!-- ══ TOP BAR ══ -->
     <header class="m-topbar m-header-navy text-white px-4 pb-2.5 flex items-center justify-between flex-shrink-0"
-        style="box-shadow:0 4px 24px rgba(12,26,46,0.45);">
-        <div class="flex items-center gap-2.5 min-w-0">
-            <div class="w-9 h-9 rounded-xl flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,var(--z-gold),var(--z-gold-d));">
+        :dir="dir" style="box-shadow:0 4px 24px rgba(12,26,46,0.45);">
+        <div class="flex items-center gap-3 flex-shrink-0">
+            <button @click="sideNavCollapsed = !sideNavCollapsed" class="w-9 h-9 flex items-center justify-center rounded-xl text-white/70 hover:text-white hover:bg-white/10 transition">
+                <i class="fas fa-bars text-base"></i>
+            </button>
+            <button @click="cart.length > 0 && !mobileCartOpen ? mobileCartOpen = true : null"
+                class="relative w-9 h-9 flex items-center justify-center rounded-xl flex-shrink-0"
+                style="background:linear-gradient(135deg,var(--z-gold),var(--z-gold-d));">
                 <i class="fas fa-cash-register text-sm" style="color:var(--z-navy);"></i>
-            </div>
-            <div class="min-w-0">
-                <div class="text-white text-sm font-bold truncate">{{ currentLocationName || 'ZAT POS' }}</div>
-                <div v-if="cashierDisplayName || (activeProfileEntry && activeProfileEntry.label)" class="text-white/50 text-[11px] truncate">
-                    {{ cashierDisplayName || activeProfileEntry.label }}
-                </div>
-            </div>
+                <span v-if="cart.length > 0" class="absolute -top-1 -end-1 bg-rose-500 text-white text-[9px] font-extrabold rounded-full w-4 h-4 flex items-center justify-center leading-none" style="border:2px solid var(--z-navy);">{{ totalItems > 9 ? '9+' : totalItems }}</span>
+            </button>
         </div>
         <div class="flex items-center gap-2 flex-shrink-0">
             <button @click="showSyncPanel = true" class="relative w-8 h-8 flex items-center justify-center rounded-xl text-white/70 hover:text-white hover:bg-white/10 transition">
@@ -168,54 +226,89 @@
         <span>{{ syncTokenExpiryBanner.text }}</span>
     </div>
 
+    <!-- ══ BODY: SIDEBAR + MAIN ══ -->
+    <div class="m-body" :dir="dir">
+
+    <!-- ══ SIDE NAV ══ -->
+    <Transition name="m-nav-backdrop">
+        <div v-if="!sideNavCollapsed" class="m-nav-backdrop" @click="sideNavCollapsed = true"></div>
+    </Transition>
+    <nav class="m-side-nav" :class="{'is-collapsed': sideNavCollapsed}" :style="{ boxShadow: dir === 'rtl' ? '-6px 0 20px rgba(12,26,46,0.5)' : '6px 0 20px rgba(12,26,46,0.5)' }">
+        <div class="m-nav-header">
+            <div class="text-white font-extrabold text-base leading-snug">{{ business.name || 'ZAT POS' }}</div>
+            <div v-if="currentLocationName" class="text-white/60 text-[12px] truncate mt-1 font-medium">{{ currentLocationName }}</div>
+            <div v-if="cashierDisplayName || (activeProfileEntry && activeProfileEntry.label)" class="text-white/35 text-[11px] truncate mt-1">{{ cashierDisplayName || activeProfileEntry.label }}</div>
+        </div>
+        <div class="m-nav-items">
+            <button @click="currentPage = 'pos'; sideNavCollapsed = true" class="m-nav-item" :class="currentPage === 'pos' ? 'is-active' : ''">
+                <i class="fas fa-cash-register m-nav-icon"></i>
+                <span>{{ t('m_nav_home') }}</span>
+            </button>
+            <button @click="currentPage = 'sales'; loadSales(); sideNavCollapsed = true" class="m-nav-item" :class="currentPage === 'sales' ? 'is-active' : ''">
+                <i class="fas fa-receipt m-nav-icon"></i>
+                <span>{{ t('nav_sales') }}</span>
+            </button>
+            <button @click="currentPage = 'held'; sideNavCollapsed = true" class="m-nav-item" :class="currentPage === 'held' ? 'is-active' : ''">
+                <i class="fas fa-pause-circle m-nav-icon"></i>
+                <span>{{ t('nav_held') }}</span>
+                <span v-if="heldSales.length > 0" class="ms-auto bg-[var(--z-gold)] text-[var(--z-navy)] text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none flex-shrink-0">{{ heldSales.length }}</span>
+            </button>
+            <button @click="showCloseRegisterControl ? openCloseRegisterFlow() : openOpenRegisterFlow(); sideNavCollapsed = true"
+                class="m-nav-item"
+                :class="showCloseRegisterControl ? 'is-active-emerald' : ''">
+                <i class="fas m-nav-icon" :class="showCloseRegisterControl ? 'fa-lock-open' : 'fa-lock'"></i>
+                <span>{{ t('m_nav_register') }}</span>
+            </button>
+            <button @click="currentPage = 'settings'; sideNavCollapsed = true" class="m-nav-item" :class="currentPage === 'settings' ? 'is-active' : ''">
+                <i class="fas fa-sliders m-nav-icon"></i>
+                <span>{{ t('m_nav_more') }}</span>
+            </button>
+        </div>
+    </nav>
+
     <!-- ══ MAIN: PRODUCT BROWSE ══ -->
     <main class="flex-1 flex flex-col overflow-hidden relative">
       <template v-if="currentPage === 'pos'">
 
-        <!-- Search (barcode merged in) + collapsed customer picker -->
-        <div class="px-4 pt-3 pb-2.5 bg-white border-b border-slate-100 flex-shrink-0">
-            <div class="flex gap-2.5 items-start">
-                <div class="relative flex-1 min-w-0" data-pos-dropdown>
-                    <div class="absolute start-1.5 top-1/2 -translate-y-1/2 w-7 h-7 rounded-lg flex items-center justify-center pointer-events-none" style="background:linear-gradient(135deg,var(--z-gold),var(--z-gold-d));">
-                        <i class="fas fa-magnifying-glass text-xs" style="color:var(--z-navy);"></i>
-                    </div>
-                    <input ref="searchInput" type="text" v-model="productSearch"
-                        @focus="showProductSuggestion = true"
-                        @input="onPrimarySearchInput"
-                        @keydown.enter="addFirstSearchResult"
-                        :placeholder="t('search_placeholder')"
-                        class="w-full ps-11 pe-11 py-3 text-sm text-start bg-white border-2 border-slate-200 rounded-xl focus:outline-none focus:border-amber-400 focus:ring-4 focus:ring-amber-500/10 transition placeholder-slate-400 shadow-sm">
-                    <button @click="focusSearch" :title="t('m_scan_barcode')"
-                        class="absolute end-1.5 top-1/2 -translate-y-1/2 w-8 h-8 flex items-center justify-center text-slate-400 active:text-amber-600 active:bg-amber-50 rounded-lg border border-slate-200 bg-white">
-                        <i class="fas fa-barcode text-xs"></i>
-                    </button>
-                    <div v-if="showProductSuggestion && filteredProducts.length"
-                        class="absolute top-full end-0 start-0 bg-white border border-slate-200 rounded-2xl shadow-xl max-h-72 overflow-auto z-50 mt-2 py-1">
-                        <div v-for="p in filteredProducts" :key="p.id" @click="addToCart(p)"
-                            class="px-3 py-2.5 active:bg-amber-50 cursor-pointer flex items-center gap-3 border-b border-slate-50 last:border-0">
-                            <img v-if="p.image" :src="p.image" class="w-10 h-10 object-cover rounded-lg flex-shrink-0 bg-slate-100" @error="p.image = null">
-                            <div v-else class="w-10 h-10 rounded-lg flex-shrink-0 bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 flex items-center justify-center">
-                                <i class="fas fa-image text-xs"></i>
-                            </div>
-                            <div class="flex-1 min-w-0">
-                                <div class="font-semibold text-sm truncate text-slate-800">{{ p.name }}</div>
-                                <div class="text-xs text-slate-400">{{ p.sku }}</div>
-                            </div>
-                            <div class="text-emerald-600 font-bold text-sm flex-shrink-0">{{ fmt(p.sell_price_inc_tax) }}</div>
-                        </div>
-                    </div>
-                </div>
+        <!-- Hidden input kept for barcode scanner hardware (HID keyboard wedge) -->
+        <input ref="searchInput" type="text" v-model="productSearch"
+            @input="onPrimarySearchInput" @keydown.enter="addFirstSearchResult"
+            style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;">
 
-                <!-- Customer: collapsed to an icon button, expands into a panel -->
-                <div class="relative flex-shrink-0" data-pos-dropdown>
+        <!-- Filter row: scrollable chips + fixed action buttons -->
+        <div class="relative flex items-center bg-white flex-shrink-0" style="box-shadow:0 1px 0 rgba(12,26,46,0.06);">
+            <div class="flex gap-2 ps-3 pe-2 py-2 overflow-x-auto scrollbar-thin flex-1">
+                <button @click="selectedCategory = null; selectedBrand = null"
+                    :class="!selectedCategory && !selectedBrand ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'"
+                    class="m-chip px-3.5 h-8 rounded-full text-xs font-bold">{{ t('all') }}</button>
+                <button v-for="cat in categories" :key="cat.id" @click="selectedCategory = cat.id; selectedBrand = null"
+                    :class="selectedCategory === cat.id ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'"
+                    class="m-chip px-3.5 h-8 rounded-full text-xs font-bold">{{ cat.name }}</button>
+            </div>
+            <!-- Action icon buttons -->
+            <div class="flex items-center gap-0.5 pe-2 ps-1 flex-shrink-0 border-s border-slate-100 self-stretch py-1.5">
+                <button @click="mobileProductViewMode = mobileProductViewMode === 'grid' ? 'list' : 'grid'"
+                    class="w-9 h-9 flex items-center justify-center rounded-xl active:bg-slate-100"
+                    :class="mobileProductViewMode === 'list' ? 'text-amber-500' : 'text-slate-500'">
+                    <i class="fas text-sm" :class="mobileProductViewMode === 'grid' ? 'fa-list' : 'fa-table-cells-large'"></i>
+                </button>
+                <button @click="showManualSearchModal = true; manualSearchQuery = ''; manualSearchCategoryId = ''; manualSearchBrandId = ''; manualSearchQty = 1"
+                    class="w-9 h-9 flex items-center justify-center rounded-xl text-slate-500 active:bg-slate-100 active:text-amber-600">
+                    <i class="fas fa-magnifying-glass text-sm"></i>
+                </button>
+                <button @click="startCameraBarcodeScan"
+                    class="w-9 h-9 flex items-center justify-center rounded-xl text-slate-500 active:bg-slate-100 active:text-amber-600">
+                    <i class="fas fa-barcode text-sm"></i>
+                </button>
+                <div class="relative" data-pos-dropdown>
                     <button type="button" @click="showCustomerDropdown = !showCustomerDropdown"
-                        class="relative w-11 h-11 rounded-2xl flex items-center justify-center transition"
-                        :class="selectedCustomer ? 'bg-amber-50 text-amber-700 border border-amber-200' : 'bg-slate-100 text-slate-500'">
+                        class="relative w-9 h-9 flex items-center justify-center rounded-xl transition"
+                        :class="selectedCustomer ? 'text-amber-600 bg-amber-50' : 'text-slate-500 active:bg-slate-100'">
                         <i class="fas fa-user text-sm"></i>
-                        <span v-if="selectedCustomer" class="absolute -top-1 -end-1 w-3.5 h-3.5 rounded-full bg-emerald-500 border-2 border-white"></span>
+                        <span v-if="selectedCustomer" class="absolute top-1 end-1 w-2 h-2 rounded-full bg-emerald-500 border border-white"></span>
                     </button>
                     <div v-if="showCustomerDropdown"
-                        class="absolute top-full end-0 w-72 max-w-[85vw] bg-white border border-slate-200 rounded-2xl shadow-xl z-50 mt-2 flex flex-col overflow-hidden">
+                        class="absolute top-full end-0 w-72 max-w-[85vw] bg-white border border-slate-200 rounded-2xl shadow-xl z-50 mt-1 flex flex-col overflow-hidden">
                         <div class="p-2.5 border-b border-slate-100">
                             <input type="text" v-model="selectedCustomerName" autofocus
                                 @input="selectedCustomer = null"
@@ -246,42 +339,19 @@
                     </div>
                 </div>
             </div>
-            <div v-if="selectedCustomer" class="mt-2 flex items-center gap-1.5 text-xs font-semibold text-amber-700">
-                <i class="fas fa-circle-user text-[11px]"></i>{{ selectedCustomerName }}
-                <button @click="clearCustomer" class="text-slate-400 active:text-rose-500"><i class="fas fa-xmark"></i></button>
-            </div>
         </div>
 
-        <!-- Category chips -->
-        <div class="flex gap-2 px-4 py-2.5 overflow-x-auto scrollbar-thin flex-shrink-0 bg-white" style="box-shadow:0 1px 0 rgba(12,26,46,0.05);">
-            <button @click="selectedCategory = null; selectedBrand = null"
-                :class="!selectedCategory && !selectedBrand ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'"
-                class="m-chip px-4 h-9 rounded-full text-xs font-bold">{{ t('all') }}</button>
-            <button v-for="cat in categories" :key="cat.id" @click="selectedCategory = cat.id; selectedBrand = null"
-                :class="selectedCategory === cat.id ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'"
-                class="m-chip px-4 h-9 rounded-full text-xs font-bold">{{ cat.name }}</button>
-            <button @click="showBrandDrawer = true" class="m-chip px-4 h-9 bg-slate-100 text-slate-600 rounded-full text-xs font-bold flex items-center gap-1.5">
-                <i class="fas fa-tag text-[10px]"></i>{{ t('brands') }}
-            </button>
-            <span class="w-px h-6 bg-slate-200 flex-shrink-0 self-center"></span>
-            <button @click="mobileProductViewMode = mobileProductViewMode === 'grid' ? 'list' : 'grid'"
-                class="m-chip px-3.5 h-9 rounded-full text-xs font-bold flex items-center gap-1.5"
-                :class="mobileProductViewMode === 'list' ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'">
-                <i class="fas text-[10px]" :class="mobileProductViewMode === 'grid' ? 'fa-bars' : 'fa-table-cells-large'"></i>{{ mobileProductViewMode === 'grid' ? t('m_list_view') : t('m_grid_view') }}
-            </button>
-            <button @click="showManualSearchModal = true; manualSearchQuery = ''; manualSearchCategoryId = ''; manualSearchBrandId = ''; manualSearchQty = 1"
-                class="m-chip px-3.5 h-9 flex-shrink-0 bg-slate-100 text-slate-600 rounded-full text-xs font-bold flex items-center gap-1.5">
-                <i class="fas fa-magnifying-glass-plus text-[10px]"></i>{{ t('m_browse') }}
-            </button>
-            <button @click="showSearchConfigModal = true"
-                class="m-chip px-3.5 h-9 flex-shrink-0 bg-slate-100 text-slate-600 rounded-full text-xs font-bold flex items-center gap-1.5">
-                <i class="fas fa-sliders text-[10px]"></i>{{ t('m_search_settings_short') }}
-            </button>
+        <!-- Cart total banner -->
+        <div v-if="cart.length > 0" @click="mobileCartOpen = true"
+            class="flex items-center justify-between px-4 py-2 flex-shrink-0 cursor-pointer active:brightness-95"
+            style="background:linear-gradient(135deg,var(--z-navy) 0%,var(--z-navy3) 100%);">
+            <span class="text-white/60 text-xs font-semibold">{{ t('items_count_short', { count: totalItems }) }}</span>
+            <span class="m-mono font-extrabold text-sm" style="color:var(--z-gold-l);">{{ fmt(grandTotal) }}</span>
         </div>
 
         <!-- Product grid (virtual scroll — same refs/handler as desktop) -->
         <div ref="gridEl" @scroll="onGridScroll" class="flex-1 p-3 overflow-auto scrollbar-thin bg-slate-50" style="padding-bottom: 96px;">
-            <div v-if="displayProducts.length === 0" class="flex flex-col items-center justify-center h-full text-center py-10">
+            <div v-if="productsReady && displayProducts.length === 0" class="flex flex-col items-center justify-center h-full text-center py-10">
                 <div class="w-16 h-16 rounded-2xl bg-slate-200 flex items-center justify-center mb-4">
                     <i class="fas fa-box-open text-2xl text-slate-400"></i>
                 </div>
@@ -317,29 +387,25 @@
             <div v-else class="space-y-2">
                 <div :style="{ height: mListTopPad + 'px' }"></div>
                 <div v-for="p in mListVisibleProducts" :key="p.id" @click="addToCart(p)"
-                    class="relative bg-white rounded-2xl cursor-pointer p-2 flex items-center gap-3"
-                    style="box-shadow:0 1px 3px rgba(12,26,46,.07), 0 1px 2px rgba(12,26,46,.04); min-height:68px;">
-                    <div class="w-14 h-14 rounded-xl overflow-hidden bg-slate-50 flex items-center justify-center flex-shrink-0">
+                    class="m-product-row relative bg-white rounded-xl cursor-pointer px-3 py-2 flex items-center gap-3"
+                    style="box-shadow:0 1px 3px rgba(12,26,46,.07), 0 1px 2px rgba(12,26,46,.04);">
+                    <div class="w-10 h-10 rounded-lg overflow-hidden bg-slate-50 flex items-center justify-center flex-shrink-0">
                         <img v-if="p.image" :src="p.image" class="w-full h-full object-cover" @error="p.image = null">
                         <div v-else class="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 flex items-center justify-center">
-                            <i class="fas fa-image text-sm"></i>
+                            <i class="fas fa-image text-xs"></i>
                         </div>
                     </div>
                     <div class="min-w-0 flex-1">
-                        <div class="font-bold text-slate-800 truncate leading-tight text-[13px] mb-0.5">{{ p.name }}</div>
-                        <div class="flex items-center gap-1.5">
+                        <div class="font-semibold text-slate-800 truncate text-[13px] leading-snug">{{ p.name }}</div>
+                        <div class="flex items-center gap-1.5 mt-0.5">
                             <span class="text-[10px] text-slate-400 truncate">{{ p.sku }}</span>
                             <span v-if="p.enable_stock" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none flex-shrink-0"
                                 :class="p.qty_available > 5 ? 'bg-slate-100 text-slate-400' : p.qty_available > 0 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'">
                                 {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
                             </span>
                         </div>
-                        <div class="m-mono font-extrabold text-sm mt-0.5" style="color:var(--z-gold-d);">{{ fmt(p.sell_price_inc_tax) }}</div>
                     </div>
-                    <div class="w-8 h-8 rounded-full flex items-center justify-center text-white text-xs flex-shrink-0"
-                        :style="p.enable_stock && p.qty_available <= 0 ? 'background:#cbd5e1;' : 'background:linear-gradient(135deg,var(--z-gold),var(--z-gold-d));'">
-                        <i class="fas fa-plus"></i>
-                    </div>
+                    <div class="m-mono font-extrabold text-sm flex-shrink-0" style="color:var(--z-gold-d);">{{ fmt(p.sell_price_inc_tax) }}</div>
                 </div>
                 <div :style="{ height: mListBottomPad + 'px' }"></div>
             </div>
@@ -432,45 +498,300 @@
         </div>
       </template>
 
-        <!-- Floating cart button -->
-        <div v-if="cart.length > 0 && !mobileCartOpen" class="m-cart-fab-wrap fixed inset-x-3 z-30">
-            <button @click="mobileCartOpen = true" class="m-cart-fab w-full flex items-center gap-3 pe-5 py-2 rounded-full">
-                <span class="relative w-11 h-11 rounded-full flex items-center justify-center flex-shrink-0" style="background:linear-gradient(135deg,var(--z-gold),var(--z-gold-d));">
-                    <i class="fas fa-cart-shopping text-sm" style="color:var(--z-navy);"></i>
-                    <span class="absolute -top-1 -end-1 bg-rose-500 text-white text-[10px] font-extrabold rounded-full w-5 h-5 flex items-center justify-center leading-none" style="border:2px solid var(--z-navy);">{{ totalItems > 9 ? '9+' : totalItems }}</span>
-                </span>
-                <span class="flex-1 text-start font-bold text-sm text-white/85">{{ t('m_view_cart') }}</span>
-                <span class="font-extrabold m-mono text-base" style="color:var(--z-gold-l);">{{ fmt(grandTotal) }}</span>
-            </button>
+      <!-- ════════ HELD SALES PAGE ════════ -->
+      <template v-else-if="currentPage === 'held'">
+        <div class="px-4 py-3 bg-white border-b border-slate-100 flex-shrink-0 flex items-center gap-3">
+            <h3 class="font-bold text-slate-800">{{ t('held_sales_title') }} <span class="text-amber-600">({{ heldSales.length }})</span></h3>
+        </div>
+        <div class="flex-1 overflow-y-auto scrollbar-thin">
+            <div v-if="heldSales.length === 0" class="py-16 text-center text-slate-400 text-sm">
+                <i class="fas fa-inbox text-3xl text-slate-300 block mb-3"></i>{{ t('no_held_sales') }}
+            </div>
+            <div v-for="h in heldSales" :key="h.id" class="border-b border-slate-100 px-4 py-3.5 flex items-center gap-3">
+                <div class="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0">
+                    <i class="fas fa-shopping-bag text-amber-500 text-sm"></i>
+                </div>
+                <div class="flex-1 min-w-0">
+                    <div class="font-semibold text-sm text-slate-800">{{ h.customer_name || t('walk_in_customer') }}</div>
+                    <div class="text-xs text-slate-500 mt-0.5">
+                        {{ t('items_count_short', { count: h.items.length }) }} ·
+                        <span class="font-semibold text-slate-600">{{ fmt(h.items.reduce((s, i) => s + i.quantity * i.unit_price, 0)) }}</span>
+                    </div>
+                    <div class="text-xs text-slate-400 mt-0.5">{{ fmtDate(h.held_at) }}</div>
+                </div>
+                <div class="flex gap-1.5 flex-shrink-0">
+                    <button @click="resumeHeldSale(h); currentPage = 'pos'; mobileCartOpen = true"
+                        class="px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5">
+                        <i class="fas fa-play text-[10px]"></i>{{ t('resume') }}
+                    </button>
+                    <button @click="deleteHeldSale(h)" class="w-9 h-9 flex items-center justify-center rounded-xl bg-rose-50 text-rose-500 border border-rose-100">
+                        <i class="fas fa-trash-can text-xs"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+      </template>
+
+      <!-- ════════ SETTINGS PAGE ════════ -->
+      <template v-else-if="currentPage === 'settings'">
+        <div class="px-4 py-3 bg-white border-b border-slate-100 flex-shrink-0">
+            <h3 class="font-bold text-slate-800">{{ t('m_settings_title') }}</h3>
+        </div>
+        <div class="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6">
+
+            <!-- Language -->
+            <section class="space-y-2">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_language_section') }}</div>
+                <div class="inline-flex rounded-xl bg-slate-100 p-1 gap-1">
+                    <button @click="setLang('ar')" :class="lang === 'ar' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'" class="px-5 py-2 rounded-lg text-xs font-bold">{{ t('arabic') }}</button>
+                    <button @click="setLang('en')" :class="lang === 'en' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'" class="px-5 py-2 rounded-lg text-xs font-bold">{{ t('english') }}</button>
+                </div>
+            </section>
+
+            <!-- Server / sync -->
+            <section class="space-y-3">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_server_section') }}</div>
+
+                <!-- Not connected, form hidden -->
+                <template v-if="!settings.apiKey && !showConnectForm">
+                    <button @click="openConnectForm" class="w-full py-3 m-btn-gold rounded-xl text-sm font-bold flex items-center justify-center gap-2">
+                        <i class="fas fa-plug"></i> {{ t('connect_to_server') }}
+                    </button>
+                </template>
+
+                <!-- Connected, form hidden -->
+                <template v-else-if="settings.apiKey && !showConnectForm">
+                    <div class="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 space-y-0.5">
+                        <div class="flex items-center gap-2">
+                            <i class="fas fa-circle-check text-emerald-500 text-sm"></i>
+                            <span class="text-sm font-semibold text-emerald-800">{{ t('connected') }}</span>
+                        </div>
+                        <div class="text-xs text-emerald-700 truncate ps-5">{{ cashierDisplayName || '—' }}</div>
+                        <div v-if="settings.serverUrl" dir="ltr" class="text-xs text-emerald-600 truncate ps-5">{{ settings.serverUrl }}</div>
+                    </div>
+                    <button @click="openConnectForm" class="w-full py-2.5 border border-slate-200 rounded-xl text-sm font-semibold text-slate-600">
+                        {{ t('reconnect') }}
+                    </button>
+                </template>
+
+                <!-- Connect form -->
+                <template v-else>
+                    <!-- Server URL -->
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('server_url') }}</label>
+                        <input type="text" v-model="connectServerUrl" dir="ltr"
+                            class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50"
+                            placeholder="https://your-server.com"
+                            @input="connectPendingToken = ''; connectLocations = []; connectLocationId = ''; connectOtpError = ''">
+                    </div>
+
+                    <!-- 6-box OTP -->
+                    <div>
+                        <label class="block text-xs font-semibold text-slate-600 mb-2">{{ t('android_otp_label') }}</label>
+                        <div class="grid grid-cols-6 gap-1.5" dir="ltr">
+                            <input v-for="(_, i) in connectOtpDigits" :key="i"
+                                :id="`m-otp-${i}`"
+                                type="text" inputmode="numeric" maxlength="2"
+                                :value="connectOtpDigits[i]"
+                                @input="onOtpDigitInput(i, $event)"
+                                @keydown="onOtpDigitKeydown(i, $event)"
+                                @focus="$event.target.select()"
+                                class="w-full aspect-square border-2 rounded-xl text-center text-lg font-mono font-bold bg-slate-50 focus:outline-none transition-colors"
+                                :class="connectPendingToken ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : connectOtpError ? 'border-red-300' : 'border-slate-200 focus:border-amber-400'">
+                        </div>
+                        <div v-if="connectOtpBusy" class="flex items-center justify-center gap-2 mt-2 text-xs text-slate-500">
+                            <i class="fas fa-spinner fa-spin"></i> {{ t('verifying') }}
+                        </div>
+                        <p v-else-if="connectOtpError" class="text-xs text-red-500 text-center mt-2">{{ connectOtpError }}</p>
+                        <p v-else-if="connectPendingToken" class="text-xs text-emerald-600 text-center mt-2 font-medium">
+                            <i class="fas fa-check-circle"></i> {{ t('otp_verified') }}
+                        </p>
+                        <p v-else class="text-xs text-slate-400 text-center mt-2">{{ t('android_otp_help') }}</p>
+                    </div>
+
+                    <!-- Location (revealed after OTP verified) -->
+                    <div v-if="connectPendingToken">
+                        <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('location') }}</label>
+                        <select v-model="connectLocationId" class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50">
+                            <option value="">{{ t('select_location') }}</option>
+                            <option v-for="loc in connectLocations" :key="loc.id" :value="String(loc.id)">{{ loc.name }}</option>
+                        </select>
+                    </div>
+
+                    <!-- Actions -->
+                    <div class="flex gap-2">
+                        <button v-if="settings.apiKey" @click="showConnectForm = false"
+                            class="flex-1 py-2.5 bg-slate-100 rounded-xl text-sm font-semibold text-slate-600">
+                            {{ t('cancel') }}
+                        </button>
+                        <button @click="saveConnection"
+                            :disabled="!connectPendingToken || !connectLocationId || connectSaveBusy"
+                            :class="connectPendingToken && connectLocationId && !connectSaveBusy ? 'm-btn-gold' : 'bg-slate-200 text-slate-400 cursor-not-allowed'"
+                            class="flex-1 py-2.5 rounded-xl text-sm font-bold">
+                            <i v-if="connectSaveBusy" class="fas fa-spinner fa-spin me-1"></i>
+                            {{ connectSaveBusy ? t('saving') : t('connect') }}
+                        </button>
+                    </div>
+                </template>
+            </section>
+
+            <!-- Printer picker -->
+            <section class="space-y-3">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_printers_section') }}</div>
+                <div class="rounded-xl border border-slate-200 px-4 py-3 bg-slate-50">
+                    <div class="text-[11px] text-slate-400 mb-0.5">{{ t('m_selected_printer') }}</div>
+                    <div class="text-sm font-semibold text-slate-700">
+                        <template v-if="selectedPrinterType === 'bluetooth' && selectedBluetoothPrinterInfo">
+                            <i class="fab fa-bluetooth-b text-amber-500 me-1"></i>{{ selectedBluetoothPrinterInfo.name || selectedBluetoothPrinterInfo.address }}
+                        </template>
+                        <template v-else-if="selectedPrinterType === 'wifi' && wifiPrinterIp">
+                            <i class="fas fa-wifi text-amber-500 me-1"></i>{{ wifiPrinterIp }}
+                        </template>
+                        <template v-else><span class="text-slate-400 font-normal">{{ t('m_none_selected') }}</span></template>
+                    </div>
+                </div>
+                <div class="flex items-center justify-between">
+                    <span class="text-sm font-semibold text-slate-700"><i class="fab fa-bluetooth-b text-amber-500 me-1.5"></i>{{ t('m_bluetooth_printers') }}</span>
+                    <button @click="scanBluetoothPrinters" :disabled="isScanningBluetoothPrinters"
+                        class="px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-semibold text-slate-600 flex items-center gap-1.5 disabled:opacity-50">
+                        <i class="fas fa-arrows-rotate text-[10px]" :class="isScanningBluetoothPrinters ? 'animate-spin' : ''"></i>
+                        {{ isScanningBluetoothPrinters ? t('m_scanning') : t('m_scan') }}
+                    </button>
+                </div>
+                <div v-if="bluetoothPrinters.length === 0" class="text-xs text-slate-400 leading-relaxed">{{ t('m_no_bluetooth_printers') }}</div>
+                <div v-else class="space-y-1.5">
+                    <div v-for="d in bluetoothPrinters" :key="d.address" @click="selectBluetoothPrinter(d)"
+                        class="flex items-center gap-3 px-4 py-3 rounded-xl border"
+                        :class="selectedBluetoothPrinterInfo?.address === d.address ? 'bg-amber-50 border-amber-300' : 'border-slate-200'">
+                        <i class="fas fa-print text-slate-400"></i>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm font-semibold text-slate-800 truncate">{{ d.name || d.address }}</div>
+                            <div class="text-[11px] text-slate-400" dir="ltr">{{ d.address }}</div>
+                        </div>
+                        <i v-if="selectedBluetoothPrinterInfo?.address === d.address" class="fas fa-circle-check text-amber-600"></i>
+                    </div>
+                </div>
+                <div>
+                    <label class="block text-xs font-semibold text-slate-600 mb-1.5"><i class="fas fa-wifi text-amber-500 me-1"></i>{{ t('m_wifi_printer_ip') }}</label>
+                    <div class="flex gap-2">
+                        <input type="text" :value="wifiPrinterIp" @change="saveWifiPrinterIp($event.target.value)" dir="ltr" placeholder="192.168.1.100"
+                            class="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50">
+                    </div>
+                </div>
+            </section>
+
+
+            <!-- Diagnostics -->
+            <section class="space-y-2">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('tab_diagnostics') }}</div>
+                <div class="rounded-xl border border-slate-200 overflow-hidden">
+                    <div class="px-4 py-2.5 bg-slate-50 m-elevated-header flex items-center justify-between gap-2">
+                        <span class="text-xs font-bold text-slate-600 flex items-center gap-1.5">
+                            {{ t('sync_failure_log_title') }}
+                            <span v-if="syncFailureLog.length" class="bg-slate-200 text-slate-600 rounded-full px-1.5 py-0.5 text-[10px] font-bold">{{ syncFailureLog.length }}</span>
+                        </span>
+                        <button v-if="syncFailureLog.length" @click="clearSyncFailureLog" class="text-[10px] text-slate-400 font-semibold">{{ t('clear') }}</button>
+                    </div>
+                    <div v-if="!syncFailureLog.length" class="px-4 py-3 text-xs text-slate-400">{{ t('no_sync_failure_log') }}</div>
+                    <div v-else class="max-h-64 overflow-y-auto scrollbar-thin divide-y divide-slate-100">
+                        <div v-for="entry in syncFailureLog" :key="entry.id" class="px-4 py-2.5 space-y-0.5">
+                            <div class="flex items-center justify-between gap-2">
+                                <span class="text-[11px] font-semibold text-slate-700 truncate">{{ entry.invoice_no || entry.local_uuid || '—' }}</span>
+                                <span class="text-[10px] text-slate-400 tabular-nums flex-shrink-0">{{ entry.atIso ? new Date(entry.atIso).toLocaleString() : '—' }}</span>
+                            </div>
+                            <div class="text-[11px] text-rose-600 break-words">{{ entry.sync_error || '—' }}</div>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <section v-if="appVersion" class="space-y-2">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_app_info') }}</div>
+                <div class="rounded-xl border border-slate-200 px-4 py-3 flex items-center justify-between">
+                    <span class="text-xs font-semibold text-slate-600">{{ t('app_version_label') }}</span>
+                    <span class="text-xs font-mono text-slate-500">v{{ appVersion }}</span>
+                </div>
+            </section>
+        </div>
+      </template>
+
+        <!-- ══ BROWSE SHEET (covers main area only, topbar stays visible) ══ -->
+        <div v-if="showManualSearchModal" class="absolute inset-0 z-10 bg-white flex flex-col" :dir="dir">
+            <!-- Row 1: search input + qty stepper — styled like the filter row -->
+            <div class="relative flex items-center bg-white flex-shrink-0" style="box-shadow:0 1px 0 rgba(12,26,46,0.06);">
+                <button @click="showManualSearchModal = false" class="w-11 h-11 flex items-center justify-center text-slate-500 active:bg-slate-100 flex-shrink-0 ms-1">
+                    <i class="fas" :class="dir === 'rtl' ? 'fa-arrow-right' : 'fa-arrow-left'"></i>
+                </button>
+                <div class="flex-1 py-2 pe-1 overflow-hidden">
+                    <input type="text" v-model="manualSearchQuery" autofocus :placeholder="t('m_search_short')"
+                        class="w-full text-sm text-slate-700 bg-slate-100 rounded-xl px-3 h-8 focus:outline-none focus:ring-2 focus:ring-amber-400/50">
+                </div>
+                <!-- qty stepper in the icon-button area on the right -->
+                <div class="flex items-center gap-0.5 pe-2 ps-1 flex-shrink-0 border-s border-slate-100 self-stretch py-1.5">
+                    <div class="flex items-center gap-0.5 bg-slate-100 rounded-xl px-1 h-8">
+                        <button @click="manualSearchQty = Math.max(1, manualSearchQty - 1)" class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 text-sm font-bold active:bg-slate-200">−</button>
+                        <input type="number" v-model.number="manualSearchQty" min="1" class="w-8 text-center text-xs font-semibold text-slate-700 bg-transparent">
+                        <button @click="manualSearchQty++" class="w-7 h-7 flex items-center justify-center rounded-lg text-slate-600 text-sm font-bold active:bg-slate-200">+</button>
+                    </div>
+                </div>
+            </div>
+            <!-- Row 2: category chips — same style as main page filter row -->
+            <div class="flex gap-2 ps-3 pe-3 py-2 overflow-x-auto scrollbar-thin flex-shrink-0 bg-white" style="box-shadow:0 1px 0 rgba(12,26,46,0.06);">
+                <button @click="manualSearchCategoryId = ''; manualSearchBrandId = ''"
+                    :class="!manualSearchCategoryId && !manualSearchBrandId ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'"
+                    class="m-chip px-3.5 h-8 rounded-full text-xs font-bold flex-shrink-0">{{ t('all') }}</button>
+                <button v-for="cat in categories" :key="'mcat-'+cat.id"
+                    @click="manualSearchCategoryId = (manualSearchCategoryId == cat.id ? '' : cat.id); manualSearchBrandId = ''"
+                    :class="manualSearchCategoryId == cat.id ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'"
+                    class="m-chip px-3.5 h-8 rounded-full text-xs font-bold flex-shrink-0">{{ cat.name }}</button>
+                <button v-for="br in brands" :key="'mbr-'+br.id"
+                    @click="manualSearchBrandId = (manualSearchBrandId == br.id ? '' : br.id); manualSearchCategoryId = ''"
+                    :class="manualSearchBrandId == br.id ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600'"
+                    class="m-chip px-3.5 h-8 rounded-full text-xs font-bold flex-shrink-0">{{ br.name }}</button>
+            </div>
+            <!-- Cart total banner (same as main page) -->
+            <div v-if="cart.length > 0" @click="showManualSearchModal = false; mobileCartOpen = true"
+                class="flex items-center justify-between px-4 py-2 flex-shrink-0 cursor-pointer active:brightness-95"
+                style="background:linear-gradient(135deg,var(--z-navy) 0%,var(--z-navy3) 100%);">
+                <span class="text-white/60 text-xs font-semibold">{{ t('items_count_short', { count: totalItems }) }}</span>
+                <span class="m-mono font-extrabold text-sm" style="color:var(--z-gold-l);">{{ fmt(grandTotal) }}</span>
+            </div>
+            <!-- Results -->
+            <div class="flex-1 overflow-y-auto scrollbar-thin">
+                <div v-if="manualSearchResults.length === 0" class="py-20 text-center text-slate-400 text-sm">
+                    <i class="fas fa-box-open text-4xl text-slate-300 block mb-3"></i>{{ t('no_matching_products') }}
+                </div>
+                <div v-else class="flex flex-col gap-1.5 p-2">
+                    <div v-for="p in manualSearchResults" :key="p.id" @click="addToCartManual(p)"
+                        class="m-product-row relative bg-white rounded-xl cursor-pointer px-3 py-2 flex items-center gap-3"
+                        style="box-shadow:0 1px 3px rgba(12,26,46,.07), 0 1px 2px rgba(12,26,46,.04);">
+                        <div class="w-10 h-10 rounded-lg overflow-hidden bg-slate-50 flex items-center justify-center flex-shrink-0">
+                            <img v-if="p.image" :src="p.image" class="w-full h-full object-cover" @error="p.image = null">
+                            <div v-else class="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 flex items-center justify-center">
+                                <i class="fas fa-image text-xs"></i>
+                            </div>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <div class="font-semibold text-slate-800 truncate text-[13px] leading-snug">{{ p.name }}</div>
+                            <div class="flex items-center gap-1.5 mt-0.5">
+                                <span class="text-[10px] text-slate-400 truncate">{{ p.sku || '—' }}</span>
+                                <span v-if="p.enable_stock" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none flex-shrink-0"
+                                    :class="p.qty_available > 5 ? 'bg-slate-100 text-slate-400' : p.qty_available > 0 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'">
+                                    {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="m-mono font-extrabold text-sm flex-shrink-0" style="color:var(--z-gold-d);">{{ fmt(p.sell_price_inc_tax) }}</div>
+                    </div>
+                </div>
+            </div>
+            <div class="px-4 py-2.5 border-t border-slate-100 flex-shrink-0 text-xs text-slate-400 text-center" style="padding-bottom: max(10px, env(safe-area-inset-bottom));">
+                {{ t('results_count', { count: manualSearchResults.length }) }}
+            </div>
         </div>
     </main>
 
-    <!-- ══ BOTTOM NAV ══ -->
-    <nav class="m-bottom-nav flex items-stretch flex-shrink-0" style="box-shadow:0 -6px 20px rgba(12,26,46,0.35);">
-        <button @click="currentPage = 'pos'" class="m-nav-item flex-1 flex flex-col items-center justify-center gap-1 py-2.5" :class="currentPage === 'pos' ? 'is-active' : ''">
-            <i class="fas fa-cash-register text-base"></i>
-            <span class="text-[10px] font-bold">{{ t('m_nav_home') }}</span>
-        </button>
-        <button @click="currentPage = 'sales'; loadSales()" class="m-nav-item flex-1 flex flex-col items-center justify-center gap-1 py-2.5" :class="currentPage === 'sales' ? 'is-active' : ''">
-            <i class="fas fa-receipt text-base"></i>
-            <span class="text-[10px] font-bold">{{ t('nav_sales') }}</span>
-        </button>
-        <button @click="showHeldSalesModal = true" class="m-nav-item relative flex-1 flex flex-col items-center justify-center gap-1 py-2.5">
-            <i class="fas fa-pause-circle text-base"></i>
-            <span class="text-[10px] font-bold">{{ t('nav_held') }}</span>
-            <span v-if="heldSales.length > 0" class="absolute top-1 end-[26%] bg-[var(--z-gold)] text-[var(--z-navy)] text-[9px] font-bold rounded-full w-4 h-4 flex items-center justify-center leading-none">{{ heldSales.length }}</span>
-        </button>
-        <button @click="showCloseRegisterControl ? openCloseRegisterFlow() : openOpenRegisterFlow()"
-            class="m-nav-item flex-1 flex flex-col items-center justify-center gap-1 py-2.5"
-            :class="showCloseRegisterControl ? 'is-active-emerald' : ''">
-            <i class="fas" :class="showCloseRegisterControl ? 'fa-lock-open' : 'fa-lock'" style="font-size:1rem"></i>
-            <span class="text-[10px] font-bold">{{ t('m_nav_register') }}</span>
-        </button>
-        <button @click="showSettings = true" class="m-nav-item flex-1 flex flex-col items-center justify-center gap-1 py-2.5">
-            <i class="fas fa-sliders text-base"></i>
-            <span class="text-[10px] font-bold">{{ t('m_nav_more') }}</span>
-        </button>
-    </nav>
+    </div><!-- /.m-body -->
 
 
     <!-- ══════════════════════════════════════════════
@@ -754,46 +1075,6 @@
     </div>
 
 
-    <!-- ══════════════════════════════════════════════
-         HELD SALES SHEET
-    ══════════════════════════════════════════════ -->
-    <div v-if="showHeldSalesModal" class="fixed inset-0 z-50 bg-white flex flex-col" :dir="dir">
-        <div class="m-topbar flex items-center justify-between px-4 pb-3 border-b border-slate-100 flex-shrink-0">
-            <div class="flex items-center gap-3">
-                <button @click="showHeldSalesModal = false" class="w-9 h-9 flex items-center justify-center rounded-xl text-slate-500 active:bg-slate-100">
-                    <i class="fas" :class="dir === 'rtl' ? 'fa-arrow-right' : 'fa-arrow-left'"></i>
-                </button>
-                <h3 class="font-bold text-slate-800">{{ t('held_sales_title') }} <span class="text-amber-600">({{ heldSales.length }})</span></h3>
-            </div>
-        </div>
-        <div class="flex-1 overflow-y-auto scrollbar-thin">
-            <div v-if="heldSales.length === 0" class="py-16 text-center text-slate-400 text-sm">
-                <i class="fas fa-inbox text-3xl text-slate-300 block mb-3"></i>{{ t('no_held_sales') }}
-            </div>
-            <div v-for="h in heldSales" :key="h.id" class="border-b border-slate-100 px-4 py-3.5 flex items-center gap-3">
-                <div class="w-10 h-10 rounded-xl bg-amber-50 border border-amber-100 flex items-center justify-center flex-shrink-0">
-                    <i class="fas fa-shopping-bag text-amber-500 text-sm"></i>
-                </div>
-                <div class="flex-1 min-w-0">
-                    <div class="font-semibold text-sm text-slate-800">{{ h.customer_name || t('walk_in_customer') }}</div>
-                    <div class="text-xs text-slate-500 mt-0.5">
-                        {{ t('items_count_short', { count: h.items.length }) }} ·
-                        <span class="font-semibold text-slate-600">{{ fmt(h.items.reduce((s, i) => s + i.quantity * i.unit_price, 0)) }}</span>
-                    </div>
-                    <div class="text-xs text-slate-400 mt-0.5">{{ fmtDate(h.held_at) }}</div>
-                </div>
-                <div class="flex gap-1.5 flex-shrink-0">
-                    <button @click="resumeHeldSale(h); showHeldSalesModal = false; mobileCartOpen = true"
-                        class="px-3 py-2 bg-emerald-600 text-white rounded-xl text-xs font-bold flex items-center gap-1.5">
-                        <i class="fas fa-play text-[10px]"></i>{{ t('resume') }}
-                    </button>
-                    <button @click="deleteHeldSale(h)" class="w-9 h-9 flex items-center justify-center rounded-xl bg-rose-50 text-rose-500 border border-rose-100">
-                        <i class="fas fa-trash-can text-xs"></i>
-                    </button>
-                </div>
-            </div>
-        </div>
-    </div>
 
 
     <!-- ══════════════════════════════════════════════
@@ -1230,168 +1511,6 @@
     </div>
 
 
-    <!-- ══════════════════════════════════════════════
-         SETTINGS SHEET (General + Printers — minimal, Phase 1)
-    ══════════════════════════════════════════════ -->
-    <div v-if="showSettings" class="fixed inset-0 z-50 bg-white flex flex-col" :dir="dir">
-        <div class="m-topbar flex items-center justify-between px-4 pb-3 border-b border-slate-100 flex-shrink-0">
-            <div class="flex items-center gap-3">
-                <button @click="showSettings = false" class="w-9 h-9 flex items-center justify-center rounded-xl text-slate-500 active:bg-slate-100">
-                    <i class="fas" :class="dir === 'rtl' ? 'fa-arrow-right' : 'fa-arrow-left'"></i>
-                </button>
-                <h3 class="font-bold text-slate-800">{{ t('m_settings_title') }}</h3>
-            </div>
-        </div>
-        <div class="flex-1 overflow-y-auto p-5 space-y-6">
-
-            <!-- Language -->
-            <section class="space-y-2">
-                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_language_section') }}</div>
-                <div class="inline-flex rounded-xl bg-slate-100 p-1 gap-1">
-                    <button @click="setLang('ar')" :class="lang === 'ar' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'" class="px-5 py-2 rounded-lg text-xs font-bold">{{ t('arabic') }}</button>
-                    <button @click="setLang('en')" :class="lang === 'en' ? 'bg-white text-slate-800 shadow-sm' : 'text-slate-500'" class="px-5 py-2 rounded-lg text-xs font-bold">{{ t('english') }}</button>
-                </div>
-            </section>
-
-            <!-- Server / sync -->
-            <section class="space-y-3">
-                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_server_section') }}</div>
-                <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('server_url') }}</label>
-                    <input type="text" v-model="settings.serverUrl" class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50" placeholder="https://your-server.com">
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('api_key') }}</label>
-                    <input type="password" v-model="settings.apiKey" class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50" :placeholder="t('api_key_placeholder')">
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('location') }}</label>
-                    <select v-model="settings.locationId" class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50">
-                        <option value="">{{ t('select_location') }}</option>
-                        <option v-for="loc in locations" :key="loc.id" :value="loc.id">{{ loc.name }}</option>
-                    </select>
-                    <button v-if="settings.serverUrl && settings.apiKey" @click="loadLocations" class="mt-1.5 text-xs text-amber-500 font-medium flex items-center gap-1">
-                        <i class="fas fa-rotate text-[10px]"></i>{{ t('refresh_locations') }}
-                    </button>
-                </div>
-                <button @click="saveSettings" class="w-full py-2.5 m-btn-gold rounded-xl text-sm font-bold">{{ t('save') }}</button>
-            </section>
-
-            <!-- Printer picker (mobile-native: Bluetooth / WiFi) -->
-            <section class="space-y-3">
-                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_printers_section') }}</div>
-                <div class="rounded-xl border border-slate-200 px-4 py-3 bg-slate-50">
-                    <div class="text-[11px] text-slate-400 mb-0.5">{{ t('m_selected_printer') }}</div>
-                    <div class="text-sm font-semibold text-slate-700">
-                        <template v-if="selectedPrinterType === 'bluetooth' && selectedBluetoothPrinterInfo">
-                            <i class="fab fa-bluetooth-b text-amber-500 me-1"></i>{{ selectedBluetoothPrinterInfo.name || selectedBluetoothPrinterInfo.address }}
-                        </template>
-                        <template v-else-if="selectedPrinterType === 'wifi' && wifiPrinterIp">
-                            <i class="fas fa-wifi text-amber-500 me-1"></i>{{ wifiPrinterIp }}
-                        </template>
-                        <template v-else><span class="text-slate-400 font-normal">{{ t('m_none_selected') }}</span></template>
-                    </div>
-                </div>
-
-                <div class="flex items-center justify-between">
-                    <span class="text-sm font-semibold text-slate-700"><i class="fab fa-bluetooth-b text-amber-500 me-1.5"></i>{{ t('m_bluetooth_printers') }}</span>
-                    <button @click="scanBluetoothPrinters" :disabled="isScanningBluetoothPrinters"
-                        class="px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-semibold text-slate-600 flex items-center gap-1.5 disabled:opacity-50">
-                        <i class="fas fa-arrows-rotate text-[10px]" :class="isScanningBluetoothPrinters ? 'animate-spin' : ''"></i>
-                        {{ isScanningBluetoothPrinters ? t('m_scanning') : t('m_scan') }}
-                    </button>
-                </div>
-                <div v-if="bluetoothPrinters.length === 0" class="text-xs text-slate-400 leading-relaxed">{{ t('m_no_bluetooth_printers') }}</div>
-                <div v-else class="space-y-1.5">
-                    <div v-for="d in bluetoothPrinters" :key="d.address" @click="selectBluetoothPrinter(d)"
-                        class="flex items-center gap-3 px-4 py-3 rounded-xl border"
-                        :class="selectedBluetoothPrinterInfo?.address === d.address ? 'bg-amber-50 border-amber-300' : 'border-slate-200'">
-                        <i class="fas fa-print text-slate-400"></i>
-                        <div class="flex-1 min-w-0">
-                            <div class="text-sm font-semibold text-slate-800 truncate">{{ d.name || d.address }}</div>
-                            <div class="text-[11px] text-slate-400" dir="ltr">{{ d.address }}</div>
-                        </div>
-                        <i v-if="selectedBluetoothPrinterInfo?.address === d.address" class="fas fa-circle-check text-amber-600"></i>
-                    </div>
-                </div>
-
-                <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1.5"><i class="fas fa-wifi text-amber-500 me-1"></i>{{ t('m_wifi_printer_ip') }}</label>
-                    <div class="flex gap-2">
-                        <input type="text" :value="wifiPrinterIp" @change="saveWifiPrinterIp($event.target.value)" dir="ltr" placeholder="192.168.1.100"
-                            class="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50">
-                    </div>
-                </div>
-            </section>
-
-            <!-- Accounts (multi-cashier profiles) -->
-            <section class="space-y-2">
-                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('tab_accounts') }}</div>
-                <p class="text-[11px] text-slate-500 leading-relaxed">{{ t('sync_accounts_help') }}</p>
-                <div class="space-y-1.5">
-                    <div v-for="p in profileRegistry.profiles" :key="p.id"
-                        class="flex items-center justify-between gap-2 rounded-xl px-3 py-2.5 border text-sm"
-                        :class="p.id === profileRegistry.activeProfileId ? 'border-amber-300 bg-amber-50/80' : 'border-slate-100 bg-slate-50/80'">
-                        <span class="truncate text-slate-800 font-medium">
-                            {{ p.label || (t('account') + ' ' + (p.id === 'default' ? t('default_account') : p.id.slice(-6))) }}
-                        </span>
-                        <button v-if="p.id !== profileRegistry.activeProfileId" type="button"
-                            :disabled="!isOnline || unsyncedForAccountSwitch > 0" @click="openSwitchAccountModal(p.id)"
-                            class="flex-shrink-0 px-2.5 py-1 rounded-lg text-xs font-semibold border"
-                            :class="(!isOnline || unsyncedForAccountSwitch > 0) ? 'border-slate-100 text-slate-300 cursor-not-allowed bg-slate-50' : 'bg-white border-slate-200 text-amber-700'">
-                            {{ t('switch') }}
-                        </button>
-                        <span v-else class="text-[10px] font-bold text-amber-600 flex-shrink-0">{{ t('active') }}</span>
-                    </div>
-                </div>
-                <div class="flex flex-col gap-2">
-                    <button type="button" :disabled="!settings.serverUrl || !settings.locationId"
-                        @click="addAccountTokenInput = ''; showAddAccountModal = true"
-                        :class="settings.serverUrl && settings.locationId ? 'bg-[var(--z-navy)] text-white' : 'bg-slate-200 text-slate-400 cursor-not-allowed'"
-                        class="py-2.5 rounded-xl text-xs font-bold">+ {{ t('add_account') }}</button>
-                    <button type="button" :disabled="!isOnline || unsyncedForAccountSwitch > 0 || preAccountSwitchBusy" @click="runPreAccountSwitchSync"
-                        :class="(!isOnline || unsyncedForAccountSwitch > 0 || preAccountSwitchBusy) ? 'border-slate-200 text-slate-400 cursor-not-allowed bg-slate-50' : 'border-amber-300 text-amber-800'"
-                        class="py-2.5 rounded-xl text-xs font-bold border">
-                        <span v-if="preAccountSwitchBusy">{{ t('syncing') }}</span><span v-else>{{ t('sync_before_switch') }}</span>
-                    </button>
-                </div>
-                <p v-if="unsyncedForAccountSwitch > 0" class="text-[11px] text-rose-600 font-medium">{{ t('unsynced_before_switch', { count: unsyncedForAccountSwitch }) }}</p>
-                <p v-if="!isOnline" class="text-[11px] text-amber-700 font-medium">{{ t('offline_switch_notice') }}</p>
-            </section>
-
-            <!-- Diagnostics -->
-            <section class="space-y-2">
-                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('tab_diagnostics') }}</div>
-                <div class="rounded-xl border border-slate-200 overflow-hidden">
-                    <div class="px-4 py-2.5 bg-slate-50 m-elevated-header flex items-center justify-between gap-2">
-                        <span class="text-xs font-bold text-slate-600 flex items-center gap-1.5">
-                            {{ t('sync_failure_log_title') }}
-                            <span v-if="syncFailureLog.length" class="bg-slate-200 text-slate-600 rounded-full px-1.5 py-0.5 text-[10px] font-bold">{{ syncFailureLog.length }}</span>
-                        </span>
-                        <button v-if="syncFailureLog.length" @click="clearSyncFailureLog" class="text-[10px] text-slate-400 font-semibold">{{ t('clear') }}</button>
-                    </div>
-                    <div v-if="!syncFailureLog.length" class="px-4 py-3 text-xs text-slate-400">{{ t('no_sync_failure_log') }}</div>
-                    <div v-else class="max-h-64 overflow-y-auto scrollbar-thin divide-y divide-slate-100">
-                        <div v-for="entry in syncFailureLog" :key="entry.id" class="px-4 py-2.5 space-y-0.5">
-                            <div class="flex items-center justify-between gap-2">
-                                <span class="text-[11px] font-semibold text-slate-700 truncate">{{ entry.invoice_no || entry.local_uuid || '—' }}</span>
-                                <span class="text-[10px] text-slate-400 tabular-nums flex-shrink-0">{{ entry.atIso ? new Date(entry.atIso).toLocaleString() : '—' }}</span>
-                            </div>
-                            <div class="text-[11px] text-rose-600 break-words">{{ entry.sync_error || '—' }}</div>
-                        </div>
-                    </div>
-                </div>
-            </section>
-
-            <section v-if="appVersion" class="space-y-2">
-                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_app_info') }}</div>
-                <div class="rounded-xl border border-slate-200 px-4 py-3 flex items-center justify-between">
-                    <span class="text-xs font-semibold text-slate-600">{{ t('app_version_label') }}</span>
-                    <span class="text-xs font-mono text-slate-500">v{{ appVersion }}</span>
-                </div>
-            </section>
-        </div>
-    </div>
 
 
     <!-- ══════════════════════════════════════════════
@@ -1714,71 +1833,6 @@
 
 
     <!-- ══════════════════════════════════════════════
-         MANUAL SEARCH SHEET (full-screen product browser w/ qty preset)
-    ══════════════════════════════════════════════ -->
-    <div v-if="showManualSearchModal" class="fixed inset-0 z-50 bg-white flex flex-col" :dir="dir">
-        <div class="m-topbar px-4 pb-3 border-b border-slate-100 flex-shrink-0 space-y-2.5 bg-white">
-            <div class="flex items-center gap-2">
-                <button @click="showManualSearchModal = false" class="w-9 h-9 flex items-center justify-center rounded-xl text-slate-500 active:bg-slate-100 flex-shrink-0">
-                    <i class="fas" :class="dir === 'rtl' ? 'fa-arrow-right' : 'fa-arrow-left'"></i>
-                </button>
-                <input type="text" v-model="manualSearchQuery" autofocus :placeholder="t('m_search_short')"
-                    class="flex-1 text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2.5">
-                <div class="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-1.5 py-1 flex-shrink-0">
-                    <button @click="manualSearchQty = Math.max(1, manualSearchQty - 1)" class="w-7 h-7 flex items-center justify-center rounded text-slate-500 text-sm font-bold">−</button>
-                    <input type="number" v-model.number="manualSearchQty" min="1" class="w-9 text-center text-sm font-semibold text-slate-700 bg-transparent">
-                    <button @click="manualSearchQty++" class="w-7 h-7 flex items-center justify-center rounded text-slate-500 text-sm font-bold">+</button>
-                </div>
-            </div>
-            <div class="flex items-center gap-2 overflow-x-auto scrollbar-thin">
-                <button @click="manualSearchCategoryId = ''; manualSearchBrandId = ''"
-                    class="px-3 py-1.5 rounded-full text-xs font-semibold flex-shrink-0" :class="!manualSearchCategoryId && !manualSearchBrandId ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'">
-                    {{ t('all') }}
-                </button>
-                <button v-for="cat in categories" :key="'mcat-'+cat.id" @click="manualSearchCategoryId = (manualSearchCategoryId == cat.id ? '' : cat.id); manualSearchBrandId = ''"
-                    class="px-3 py-1.5 rounded-full text-xs font-semibold flex-shrink-0" :class="manualSearchCategoryId == cat.id ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'">
-                    {{ cat.name }}
-                </button>
-                <button v-for="br in brands" :key="'mbr-'+br.id" @click="manualSearchBrandId = (manualSearchBrandId == br.id ? '' : br.id); manualSearchCategoryId = ''"
-                    class="px-3 py-1.5 rounded-full text-xs font-semibold flex-shrink-0" :class="manualSearchBrandId == br.id ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600'">
-                    {{ br.name }}
-                </button>
-            </div>
-        </div>
-        <div class="flex-1 overflow-y-auto scrollbar-thin">
-            <div v-if="manualSearchResults.length === 0" class="py-20 text-center text-slate-400 text-sm">
-                <i class="fas fa-box-open text-4xl text-slate-300 block mb-3"></i>{{ t('no_matching_products') }}
-            </div>
-            <div v-else class="divide-y divide-slate-100">
-                <div v-for="p in manualSearchResults" :key="p.id" class="px-4 py-3 flex items-center gap-3">
-                    <img v-if="p.image" :src="p.image" class="w-11 h-11 object-cover rounded-lg flex-shrink-0 bg-slate-100" @error="p.image = null">
-                    <div v-else class="w-11 h-11 rounded-lg flex-shrink-0 bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 flex items-center justify-center">
-                        <i class="fas fa-image text-sm"></i>
-                    </div>
-                    <div class="flex-1 min-w-0">
-                        <div class="font-semibold text-sm text-slate-800 truncate">{{ p.name }}</div>
-                        <div class="text-xs text-slate-400 flex items-center gap-2">
-                            <span>{{ p.sku || '—' }}</span>
-                            <span v-if="p.enable_stock" class="px-1.5 py-0.5 rounded-full text-[10px] font-semibold"
-                                :class="p.qty_available > 5 ? 'bg-slate-100 text-slate-500' : p.qty_available > 0 ? 'bg-amber-50 text-amber-600' : 'bg-rose-50 text-rose-500'">
-                                {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
-                            </span>
-                        </div>
-                        <div class="text-emerald-600 font-bold text-sm mt-0.5">{{ fmt(p.sell_price_inc_tax) }}</div>
-                    </div>
-                    <button @click="addToCartManual(p)" class="flex-shrink-0 flex items-center gap-1.5 px-3 py-2 rounded-xl m-btn-gold text-xs font-semibold">
-                        <i class="fas fa-plus text-[10px]"></i>×{{ manualSearchQty }}
-                    </button>
-                </div>
-            </div>
-        </div>
-        <div class="px-4 py-2.5 border-t border-slate-100 flex-shrink-0 text-xs text-slate-400 text-center" style="padding-bottom: max(10px, env(safe-area-inset-bottom));">
-            {{ t('results_count', { count: manualSearchResults.length }) }}
-        </div>
-    </div>
-
-
-    <!-- ══════════════════════════════════════════════
          SYNC SHEET (full-screen)
     ══════════════════════════════════════════════ -->
     <div v-if="showSyncPanel" class="fixed inset-0 z-50 bg-white flex flex-col" :dir="dir">
@@ -1924,37 +1978,6 @@
     </div>
 
 
-    <!-- ══════════════════════════════════════════════
-         ADD ACCOUNT SHEET
-    ══════════════════════════════════════════════ -->
-    <div v-if="showAddAccountModal" class="fixed inset-0 z-[60] modal-backdrop flex items-end" @click.self="showAddAccountModal = false" :dir="dir">
-        <div class="bg-white rounded-t-3xl w-full p-6 space-y-3" style="padding-bottom: max(24px, env(safe-area-inset-bottom));">
-            <div class="w-10 h-1.5 bg-slate-200 rounded-full mx-auto mb-1"></div>
-            <h3 class="font-bold text-slate-800 text-sm">{{ t('add_cashier_account') }}</h3>
-            <p class="text-xs text-slate-600 leading-relaxed">{{ t('add_account_help') }}</p>
-            <div>
-                <span class="block text-[11px] font-semibold text-slate-500 mb-1">{{ t('server_url_readonly') }}</span>
-                <div dir="ltr" class="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs font-mono bg-slate-100 text-slate-700 truncate">{{ settings.serverUrl || '—' }}</div>
-            </div>
-            <div>
-                <span class="block text-[11px] font-semibold text-slate-500 mb-1">{{ t('location_readonly') }}</span>
-                <div class="w-full border border-slate-200 rounded-xl px-3 py-2 text-xs bg-slate-100 text-slate-700 truncate">
-                    {{ (locations.find(l => String(l.id) === String(settings.locationId)) || {}).name || settings.locationId }}
-                </div>
-            </div>
-            <div>
-                <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('new_account_sync_token') }}</label>
-                <input v-model="addAccountTokenInput" type="password" dir="ltr" autocomplete="off"
-                    class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm font-mono bg-slate-50" :placeholder="t('paste_token_only')" @keyup.enter="addAccountFromEnvSnippet">
-            </div>
-            <div class="flex gap-2 pt-1">
-                <button @click="showAddAccountModal = false" class="flex-1 py-3 bg-slate-100 rounded-xl text-sm font-semibold text-slate-700">{{ t('cancel') }}</button>
-                <button @click="addAccountFromEnvSnippet" :disabled="!settings.serverUrl || !settings.locationId"
-                    :class="settings.serverUrl && settings.locationId ? 'm-btn-gold' : 'bg-slate-200 text-slate-400 cursor-not-allowed'"
-                    class="flex-1 py-3 rounded-xl text-sm font-bold">{{ t('add_and_switch') }}</button>
-            </div>
-        </div>
-    </div>
 
 
     <!-- ══════════════════════════════════════════════
@@ -1998,6 +2021,24 @@
             }"></i>
             <span class="font-medium leading-snug">{{ toast.msg }}</span>
         </div>
+    </div>
+
+    <!-- ══ BARCODE CAMERA SCANNER OVERLAY ══ -->
+    <div id="barcode-scan-overlay" v-if="scannerActive"
+        class="fixed inset-0 z-[9999] flex flex-col items-center justify-center" :dir="dir">
+        <div class="relative w-64 h-44 rounded-2xl"
+            style="border:2px solid rgba(255,255,255,.85);box-shadow:0 0 0 9999px rgba(0,0,0,.55);">
+            <span class="absolute top-0 start-0 w-5 h-5 border-t-2 border-s-2 rounded-ss-lg" style="border-color:var(--z-gold-l)"></span>
+            <span class="absolute top-0 end-0 w-5 h-5 border-t-2 border-e-2 rounded-se-lg" style="border-color:var(--z-gold-l)"></span>
+            <span class="absolute bottom-0 start-0 w-5 h-5 border-b-2 border-s-2 rounded-es-lg" style="border-color:var(--z-gold-l)"></span>
+            <span class="absolute bottom-0 end-0 w-5 h-5 border-b-2 border-e-2 rounded-ee-lg" style="border-color:var(--z-gold-l)"></span>
+        </div>
+        <p class="text-white/60 text-xs mt-5 mb-6">{{ t('m_scan_barcode') }}</p>
+        <button @click="cancelCameraBarcodeScan"
+            class="px-8 py-3 rounded-2xl text-sm font-bold"
+            style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.25);">
+            {{ t('cancel') }}
+        </button>
     </div>
 
 </div><!-- /#app -->
