@@ -1402,7 +1402,6 @@ createApp({
                     if (productSearch.value) {
                         manualSearchQuery.value = productSearch.value;
                         productSearch.value = '';
-                        showManualSearchModal.value = true;
                     }
                 }
             } catch (_) {
@@ -2202,6 +2201,8 @@ createApp({
             if (blockSaleIfPhase2Offline()) return;
             const tx = await buildFinalTransaction([{ method: 'cash', amount: grandTotal.value }]);
             await saveTransaction(tx);
+            showPaymentModal.value = false;
+            mobileCartOpen.value = false;
             toast(t('sale_saved'), 'success');
             printReceipt(lastReceipt.value, { silent: true });
             if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
@@ -2215,6 +2216,8 @@ createApp({
             if (blockSaleIfPhase2Offline()) return;
             const tx = await buildFinalTransaction([{ method: 'card', amount: grandTotal.value }]);
             await saveTransaction(tx);
+            showPaymentModal.value = false;
+            mobileCartOpen.value = false;
             toast(t('sale_saved_card'), 'success');
             printReceipt(lastReceipt.value, { silent: true });
             if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});

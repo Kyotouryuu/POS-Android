@@ -126,7 +126,6 @@
         .m-btn-gold {
             background: linear-gradient(135deg, var(--z-gold), var(--z-gold-d));
             color: var(--z-navy);
-            box-shadow: 0 6px 16px rgba(245,158,11,.32);
         }
         .m-btn-gold:active { filter: brightness(0.95); box-shadow: 0 3px 8px rgba(245,158,11,.28); }
 
@@ -291,10 +290,6 @@
                     :class="mobileProductViewMode === 'list' ? 'text-amber-500' : 'text-slate-500'">
                     <i class="fas text-sm" :class="mobileProductViewMode === 'grid' ? 'fa-list' : 'fa-table-cells-large'"></i>
                 </button>
-                <button @click="showManualSearchModal = true; manualSearchQuery = ''; manualSearchCategoryId = ''; manualSearchBrandId = ''; manualSearchQty = 1"
-                    class="w-9 h-9 flex items-center justify-center rounded-xl text-slate-500 active:bg-slate-100 active:text-amber-600">
-                    <i class="fas fa-magnifying-glass text-sm"></i>
-                </button>
                 <button @click="startCameraBarcodeScan"
                     class="w-9 h-9 flex items-center justify-center rounded-xl text-slate-500 active:bg-slate-100 active:text-amber-600">
                     <i class="fas fa-barcode text-sm"></i>
@@ -340,16 +335,63 @@
             </div>
         </div>
 
-        <!-- Cart total banner -->
-        <div v-if="cart.length > 0" @click="mobileCartOpen = true"
-            class="flex items-center justify-between px-4 py-2 flex-shrink-0 cursor-pointer active:brightness-95"
+        <!-- Search bar -->
+        <div class="relative bg-white flex-shrink-0 px-3 pt-2 pb-1.5" style="box-shadow:0 1px 0 rgba(12,26,46,0.06);">
+            <div class="relative">
+                <i class="fas fa-magnifying-glass absolute start-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
+                <input type="text" v-model="manualSearchQuery" :placeholder="t('m_search_short')"
+                    class="w-full ps-9 pe-8 h-9 text-sm bg-slate-100 border border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:bg-white transition placeholder-slate-400">
+                <button v-if="manualSearchQuery" @click="manualSearchQuery = ''"
+                    class="absolute end-1.5 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center text-slate-400 active:text-slate-600">
+                    <i class="fas fa-xmark text-xs"></i>
+                </button>
+            </div>
+        </div>
+
+        <!-- Cart total button — tap to go to payment -->
+        <button v-if="cart.length > 0" @click="openPaymentModal"
+            class="mx-3 my-2 flex-shrink-0 rounded-2xl flex flex-col items-center justify-center py-4 gap-1 active:brightness-90"
             style="background:linear-gradient(135deg,var(--z-navy) 0%,var(--z-navy3) 100%);">
-            <span class="text-white/60 text-xs font-semibold">{{ t('items_count_short', { count: totalItems }) }}</span>
-            <span class="m-mono font-extrabold text-sm" style="color:var(--z-gold-l);">{{ fmt(grandTotal) }}</span>
+            <span class="text-white/50 text-xs font-semibold">{{ t('items_count_short', { count: totalItems }) }}</span>
+            <span class="m-mono font-extrabold text-3xl tracking-tight" style="color:var(--z-gold-l);">{{ fmt(grandTotal) }}</span>
+            <span class="text-white/40 text-[10px] flex items-center gap-1">{{ t('payment_title') }} <i class="fas fa-chevron-right text-[8px]"></i></span>
+        </button>
+
+        <!-- Search results (shown when query is active) -->
+        <div v-if="manualSearchQuery" class="flex-1 overflow-y-auto scrollbar-thin">
+            <div v-if="manualSearchResults.length === 0" class="py-20 text-center text-slate-400 text-sm">
+                <i class="fas fa-box-open text-4xl text-slate-300 block mb-3"></i>{{ t('no_matching_products') }}
+            </div>
+            <div v-else class="flex flex-col gap-1.5 p-2" style="padding-bottom: 96px;">
+                <div v-for="p in manualSearchResults" :key="p.id" @click="addToCartManual(p)"
+                    class="m-product-row relative bg-white rounded-xl cursor-pointer px-3 py-2 flex items-center gap-3"
+                    style="box-shadow:0 1px 3px rgba(12,26,46,.07), 0 1px 2px rgba(12,26,46,.04);">
+                    <div class="w-10 h-10 rounded-lg overflow-hidden bg-slate-50 flex items-center justify-center flex-shrink-0">
+                        <img v-if="p.image" :src="p.image" class="w-full h-full object-cover" @error="p.image = null">
+                        <div v-else class="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 flex items-center justify-center">
+                            <i class="fas fa-image text-xs"></i>
+                        </div>
+                    </div>
+                    <div class="min-w-0 flex-1">
+                        <div class="font-semibold text-slate-800 truncate text-[13px] leading-snug">{{ p.name }}</div>
+                        <div class="flex items-center gap-1.5 mt-0.5">
+                            <span class="text-[10px] text-slate-400 truncate">{{ p.sku || '—' }}</span>
+                            <span v-if="p.enable_stock" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none flex-shrink-0"
+                                :class="p.qty_available > 5 ? 'bg-slate-100 text-slate-400' : p.qty_available > 0 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'">
+                                {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="m-mono font-extrabold text-sm flex-shrink-0" style="color:var(--z-gold-d);">{{ fmt(p.sell_price_inc_tax) }}</div>
+                </div>
+            </div>
+            <div class="px-4 py-2.5 border-t border-slate-100 flex-shrink-0 text-xs text-slate-400 text-center" style="padding-bottom: max(10px, env(safe-area-inset-bottom));">
+                {{ t('results_count', { count: manualSearchResults.length }) }}
+            </div>
         </div>
 
         <!-- Product grid (virtual scroll — same refs/handler as desktop) -->
-        <div ref="gridEl" @scroll="onGridScroll" class="flex-1 p-3 overflow-auto scrollbar-thin bg-slate-50" style="padding-bottom: 96px;">
+        <div v-else ref="gridEl" @scroll="onGridScroll" class="flex-1 p-3 overflow-auto scrollbar-thin bg-slate-50" style="padding-bottom: 96px;">
             <div v-if="productsReady && displayProducts.length === 0" class="flex flex-col items-center justify-center h-full text-center py-10">
                 <div class="w-16 h-16 rounded-2xl bg-slate-200 flex items-center justify-center mb-4">
                     <i class="fas fa-box-open text-2xl text-slate-400"></i>
@@ -748,13 +790,13 @@
                     :class="manualSearchBrandId == br.id ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600'"
                     class="m-chip px-3.5 h-8 rounded-full text-xs font-bold flex-shrink-0">{{ br.name }}</button>
             </div>
-            <!-- Cart total banner (same as main page) -->
-            <div v-if="cart.length > 0" @click="showManualSearchModal = false; mobileCartOpen = true"
-                class="flex items-center justify-between px-4 py-2 flex-shrink-0 cursor-pointer active:brightness-95"
+            <button v-if="cart.length > 0" @click="showManualSearchModal = false; openPaymentModal()"
+                class="mx-3 my-2 rounded-2xl flex flex-col items-center justify-center py-4 gap-1 active:brightness-90"
                 style="background:linear-gradient(135deg,var(--z-navy) 0%,var(--z-navy3) 100%);">
-                <span class="text-white/60 text-xs font-semibold">{{ t('items_count_short', { count: totalItems }) }}</span>
-                <span class="m-mono font-extrabold text-sm" style="color:var(--z-gold-l);">{{ fmt(grandTotal) }}</span>
-            </div>
+                <span class="text-white/50 text-xs font-semibold">{{ t('items_count_short', { count: totalItems }) }}</span>
+                <span class="m-mono font-extrabold text-3xl tracking-tight" style="color:var(--z-gold-l);">{{ fmt(grandTotal) }}</span>
+                <span class="text-white/40 text-[10px] flex items-center gap-1">{{ t('payment_title') }} <i class="fas fa-chevron-right text-[8px]"></i></span>
+            </button>
             <!-- Results -->
             <div class="flex-1 overflow-y-auto scrollbar-thin">
                 <div v-if="manualSearchResults.length === 0" class="py-20 text-center text-slate-400 text-sm">
@@ -972,18 +1014,14 @@
             </template>
         </div>
 
-        <!-- Sticky payment actions -->
+        <!-- Proceed to payment -->
         <div v-if="cart.length > 0" class="p-3 flex-shrink-0 bg-white" style="padding-bottom: max(12px, env(safe-area-inset-bottom)); box-shadow:0 -4px 16px rgba(12,26,46,.08);">
-            <div class="m-pay-bar flex items-stretch rounded-full overflow-hidden">
-                <button @click="expressCash" class="flex-1 py-3.5 text-white font-bold text-sm flex items-center justify-center gap-2 active:bg-white/10">
-                    <i class="fas fa-money-bill-wave text-emerald-300"></i>{{ t('cash') }}
-                </button>
-                <span class="w-px my-2.5 bg-white/15 flex-shrink-0"></span>
-                <button @click="openPaymentModal" class="flex-[1.4] py-3.5 font-bold text-sm flex items-center justify-center gap-2 active:brightness-95 rounded-e-full"
-                    style="background:linear-gradient(135deg,var(--z-gold),var(--z-gold-d)); color:var(--z-navy);">
-                    <i class="fas fa-credit-card"></i>{{ t('multi_pay') }}
-                </button>
-            </div>
+            <button @click="openPaymentModal"
+                class="w-full rounded-2xl flex flex-col items-center justify-center py-3.5 gap-1 active:brightness-90"
+                style="background:linear-gradient(135deg,var(--z-navy) 0%,var(--z-navy3) 100%);">
+                <span class="text-white/50 text-xs font-semibold">{{ t('payment_title') }}</span>
+                <span class="m-mono font-extrabold text-2xl tracking-tight" style="color:var(--z-gold-l);">{{ fmt(grandTotal) }}</span>
+            </button>
         </div>
     </div>
 
@@ -1278,6 +1316,23 @@
                     <div class="text-[10px] font-medium mb-0.5" :class="balanceDue > 0.005 ? 'text-rose-500' : 'text-emerald-600'">{{ balanceDue > 0.005 ? t('balance_due') : t('change') }}</div>
                     <div class="text-base font-extrabold m-mono tracking-tight" :class="balanceDue > 0.005 ? 'text-rose-600' : 'text-emerald-600'">{{ fmt(Math.abs(balanceDue)) }}</div>
                 </div>
+            </div>
+
+            <!-- Express pay -->
+            <div class="grid grid-cols-2 gap-3">
+                <button @click="expressCash"
+                    class="py-3.5 bg-emerald-600 text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 active:brightness-90">
+                    <i class="fas fa-money-bill-wave"></i>{{ t('cash') }}
+                </button>
+                <button @click="expressCard"
+                    class="py-3.5 bg-rose-600 text-white rounded-2xl font-bold text-sm flex items-center justify-center gap-2 active:brightness-90">
+                    <i class="fas fa-credit-card"></i>{{ t('card') }}
+                </button>
+            </div>
+            <div class="flex items-center gap-2">
+                <div class="flex-1 h-px bg-slate-100"></div>
+                <span class="text-xs text-slate-400 font-medium">{{ t('multi_pay') }}</span>
+                <div class="flex-1 h-px bg-slate-100"></div>
             </div>
 
             <div class="flex gap-2 flex-wrap">
