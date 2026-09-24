@@ -24,6 +24,9 @@ android/.idea/
 android/.externalNativeBuild/
 android/.cxx/
 android/*.iml
+android/keystore.properties
+android/**/*.jks
+android/**/*.keystore
 
 # IDE / OS
 .idea/

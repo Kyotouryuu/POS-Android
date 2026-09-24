@@ -1,0 +1,435 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ZAT POS Privacy Policy</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg: #f6f8f5;
+    --surface: #ffffff;
+    --text: #1a2019;
+    --text-muted: #566057;
+    --accent: #0e6b49;
+    --accent-ink: #ffffff;
+    --accent-soft: #e4f0e8;
+    --border: #dfe6e0;
+    --table-stripe: #f1f5f0;
+    --callout-bg: #eef6f1;
+    --callout-border: #bcdbc7;
+    --link: #0e6b49;
+  }
+  @media (prefers-color-scheme: dark){
+    :root:not([data-theme="light"]){
+      --bg: #12160f;
+      --surface: #171c14;
+      --text: #e8ece5;
+      --text-muted: #9baa9a;
+      --accent: #46b083;
+      --accent-ink: #0b120c;
+      --accent-soft: #1c2a1f;
+      --border: #2a332a;
+      --table-stripe: #1a201a;
+      --callout-bg: #1a2a20;
+      --callout-border: #2e4a37;
+      --link: #5ec498;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg: #12160f;
+    --surface: #171c14;
+    --text: #e8ece5;
+    --text-muted: #9baa9a;
+    --accent: #46b083;
+    --accent-ink: #0b120c;
+    --accent-soft: #1c2a1f;
+    --border: #2a332a;
+    --table-stripe: #1a201a;
+    --callout-bg: #1a2a20;
+    --callout-border: #2e4a37;
+    --link: #5ec498;
+  }
+
+  *{ box-sizing: border-box; }
+  body{
+    background: var(--bg);
+    color: var(--text);
+    font-family: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+    font-size: 16px;
+    line-height: 1.6;
+    padding: 0 20px;
+  }
+  h1,h2,h3{
+    font-family: "Source Serif 4", Georgia, serif;
+    font-weight: 600;
+    text-wrap: balance;
+    color: var(--text);
+  }
+  .mono{
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  a{ color: var(--link); }
+  a:focus-visible, button:focus-visible{ outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .shell{
+    max-width: 1180px;
+    margin: 0 auto;
+    padding-block: 48px 96px;
+  }
+
+  /* ---- Document header ---- */
+  .doc-header{
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: flex-end;
+    gap: 20px 32px;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 28px;
+    margin-bottom: 40px;
+  }
+  .mark{
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .mark .glyph{
+    width: 34px; height: 34px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: var(--accent-ink);
+    display: grid;
+    place-items: center;
+    font-family: "IBM Plex Mono", monospace;
+    font-weight: 500;
+    font-size: 13px;
+    flex: none;
+  }
+  .mark .wordmark{
+    font-family: "Source Serif 4", serif;
+    font-weight: 600;
+    font-size: 19px;
+    letter-spacing: 0.01em;
+  }
+  .doc-title{
+    font-size: clamp(2rem, 4vw, 2.75rem);
+    line-height: 1.08;
+    margin: 14px 0 0;
+  }
+  .doc-meta{
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 22px;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 12.5px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .doc-meta span b{
+    color: var(--text);
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  /* ---- Layout: nav + content ---- */
+  .layout{
+    display: grid;
+    grid-template-columns: 220px minmax(0,1fr);
+    gap: 56px;
+    align-items: start;
+  }
+  nav.toc{
+    position: sticky;
+    top: 32px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    font-size: 13.5px;
+  }
+  nav.toc a{
+    color: var(--text-muted);
+    text-decoration: none;
+    padding: 6px 0 6px 12px;
+    border-left: 2px solid var(--border);
+    transition: color .15s ease, border-color .15s ease;
+  }
+  nav.toc a:hover{ color: var(--text); border-color: var(--text-muted); }
+  nav.toc .toc-label{
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+
+  main{ max-width: 700px; }
+  main > section{
+    padding-top: 40px;
+    margin-top: 40px;
+    border-top: 1px solid var(--border);
+    scroll-margin-top: 24px;
+  }
+  main > section:first-of-type{ border-top: none; margin-top: 0; padding-top: 0; }
+
+  h2{
+    font-size: 1.5rem;
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    margin: 0 0 14px;
+  }
+  h2 .num{
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 13px;
+    color: var(--accent);
+    font-weight: 500;
+  }
+  h3{
+    font-size: 1.05rem;
+    margin: 24px 0 8px;
+  }
+  p{ margin: 0 0 14px; color: var(--text); }
+  p.lead{ color: var(--text-muted); }
+  ul{ margin: 0 0 14px; padding-left: 1.2em; }
+  li{ margin-bottom: 6px; }
+  strong{ font-weight: 600; }
+
+  /* ---- Data ledger table (receipt-inspired) ---- */
+  .ledger{
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 14.5px;
+    margin: 18px 0 22px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    overflow: hidden;
+  }
+  .ledger caption{
+    text-align: left;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+  }
+  .ledger th, .ledger td{
+    text-align: left;
+    padding: 10px 14px;
+    vertical-align: top;
+    border-bottom: 1px solid var(--border);
+  }
+  .ledger thead th{
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 11px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    background: var(--table-stripe);
+    font-weight: 500;
+  }
+  .ledger tbody tr:last-child td{ border-bottom: none; }
+  .ledger tbody tr:nth-child(even){ background: var(--table-stripe); }
+  .ledger td.cat{ font-weight: 500; white-space: nowrap; }
+
+  .callout{
+    background: var(--callout-bg);
+    border: 1px solid var(--callout-border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    font-size: 14.5px;
+    margin: 16px 0;
+  }
+  .callout p:last-child{ margin-bottom: 0; }
+
+  footer{
+    margin-top: 56px;
+    padding-top: 24px;
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text-muted);
+  }
+
+  @media (max-width: 820px){
+    .layout{ grid-template-columns: 1fr; gap: 24px; }
+    nav.toc{
+      position: static;
+      flex-direction: row;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    nav.toc .toc-label{ display: none; }
+    nav.toc a{
+      border-left: none;
+      border: 1px solid var(--border);
+      border-radius: 999px;
+      padding: 5px 12px;
+    }
+    main{ max-width: none; }
+  }
+</style>
+</head>
+<body>
+<div class="shell">
+
+  <header class="doc-header">
+    <div>
+      <div class="mark">
+        <span class="glyph">Z</span>
+        <span class="wordmark">ZAT POS</span>
+      </div>
+      <h1 class="doc-title">Privacy Policy</h1>
+    </div>
+    <div class="doc-meta">
+      <span>Effective <b>24 Sep 2026</b></span>
+      <span>Doc <b>PP-1.0</b></span>
+      <span>Entity <b>ZAT POS &mdash; Saudi Arabia</b></span>
+      <span>Contact <b><a href="mailto:info@zaterp.com">info@zaterp.com</a></b></span>
+    </div>
+  </header>
+
+  <div class="layout">
+    <nav class="toc" aria-label="Table of contents">
+      <span class="toc-label">On this page</span>
+      <a href="#scope">Scope</a>
+      <a href="#data">Data we collect</a>
+      <a href="#payment">Payment records</a>
+      <a href="#use">How we use it</a>
+      <a href="#sharing">Sharing &amp; disclosure</a>
+      <a href="#storage">Storage &amp; security</a>
+      <a href="#retention">Retention &amp; deletion</a>
+      <a href="#rights">Your rights</a>
+      <a href="#children">Children</a>
+      <a href="#changes">Changes</a>
+      <a href="#contact">Contact</a>
+    </nav>
+
+    <main>
+      <section id="scope">
+        <h2><span class="num">01</span>Scope</h2>
+        <p class="lead">This policy covers the ZAT POS mobile app (Android package <code class="mono">com.zatpos.app</code>), its desktop counterpart, and the ZAT POS sync service at <span class="mono">zaterp.com</span> that the app connects to. ZAT POS is a point-of-sale application built for merchants operating in Saudi Arabia, including support for ZATCA-compliant e-invoicing.</p>
+        <p>ZAT POS is a business tool used by the merchant (you) and your staff. It is not directed at, or intended for use by, consumers browsing or shopping &mdash; the people whose data appears in the app are your own customers and transactions, which you control as the data controller for your business.</p>
+      </section>
+
+      <section id="data">
+        <h2><span class="num">02</span>Data we collect</h2>
+        <p>ZAT POS is offline-first: everything below is stored on your device first, and synced to ZAT POS servers over an encrypted connection whenever the device is online and signed in to a business account.</p>
+        <table class="ledger">
+          <caption>Data inventory</caption>
+          <thead>
+            <tr><th>Category</th><th>What it includes</th><th>Why</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td class="cat">Account &amp; sign-in</td>
+              <td>Session/sync token, one-time verification code (OTP), the business account (tenant) the device is paired to</td>
+              <td>Authenticate the device and keep it paired to the correct business account</td>
+            </tr>
+            <tr>
+              <td class="cat">Sales &amp; business records</td>
+              <td>Products, transactions, held sales, receipts, invoice numbering, ZATCA e-invoice hash and invoice counter value (ICV)</td>
+              <td>Run the point-of-sale, keep records consistent across your devices and locations, meet Saudi e-invoicing requirements</td>
+            </tr>
+            <tr>
+              <td class="cat">Your customers' details</td>
+              <td>Name, phone number, email, tax number, loyalty/credit balance &mdash; entered by you or your staff</td>
+              <td>Customer records, invoicing, and loyalty balances you choose to track</td>
+            </tr>
+            <tr>
+              <td class="cat">Camera</td>
+              <td>Live camera feed used only while the barcode scanner is open</td>
+              <td>Look up a product by its barcode. No photo or video is captured, saved, or transmitted.</td>
+            </tr>
+            <tr>
+              <td class="cat">Local printer traffic</td>
+              <td>Receipt content sent to a receipt printer on your Wi-Fi network, or to a print-helper running on the same device (<span class="mono">127.0.0.1</span>)</td>
+              <td>Print receipts. This traffic stays on your local network and is never sent to ZAT POS servers.</td>
+            </tr>
+            <tr>
+              <td class="cat">Diagnostics</td>
+              <td>None collected</td>
+              <td>ZAT POS does not use any analytics, advertising, or crash-reporting SDK.</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="payment">
+        <h2><span class="num">03</span>Payment method records</h2>
+        <p>When you complete a sale, ZAT POS records the payment method you select for your own bookkeeping (for example, "cash" or "card"). The app does not integrate a card reader or payment gateway, and does not capture, transmit, or store full card numbers or other live card data.</p>
+        <div class="callout">
+          <p>If a card reader or payment gateway integration is added in the future, this section &mdash; and the corresponding Google Play Data Safety declaration &mdash; will need to be updated to name the processor and describe how card data is handled.</p>
+        </div>
+      </section>
+
+      <section id="use">
+        <h2><span class="num">04</span>How we use it</h2>
+        <ul>
+          <li>Operate core point-of-sale functionality: sales, inventory, customers, receipts.</li>
+          <li>Keep your data in sync across every device and location on your account.</li>
+          <li>Generate ZATCA-compliant e-invoices where required by Saudi tax regulation.</li>
+          <li>Authenticate your devices and protect your account from unauthorized access.</li>
+        </ul>
+        <p>We do not use your business or customer data to serve ads, and we do not build advertising profiles from it.</p>
+      </section>
+
+      <section id="sharing">
+        <h2><span class="num">05</span>Sharing &amp; disclosure</h2>
+        <p>We do not sell your data, and we do not share it with advertisers or data brokers. Data is shared only in these cases:</p>
+        <ul>
+          <li><strong>Saudi tax authority (ZATCA)</strong> &mdash; e-invoice data is submitted where legally required for e-invoicing compliance.</li>
+          <li><strong>Infrastructure providers</strong> &mdash; hosting and server infrastructure that stores and syncs your account data on our behalf, under contract, and only to provide the service.</li>
+          <li><strong>Legal requirements</strong> &mdash; if required to comply with a valid legal process under Saudi law.</li>
+        </ul>
+      </section>
+
+      <section id="storage">
+        <h2><span class="num">06</span>Storage &amp; security</h2>
+        <ul>
+          <li>Data in transit to ZAT POS servers is encrypted (HTTPS).</li>
+          <li>Data at rest on your device is stored in the app's private storage, inaccessible to other apps.</li>
+          <li>Android's automatic device backup is disabled for ZAT POS, so business and account data is never copied to a Google account backup.</li>
+          <li>Local printer communication is limited to your local network and is not routed through ZAT POS servers.</li>
+        </ul>
+      </section>
+
+      <section id="retention">
+        <h2><span class="num">07</span>Retention &amp; deletion</h2>
+        <p>Business and transaction records are retained for as long as your account is active, and afterward as required by Saudi commercial and tax recordkeeping rules. You can request deletion of your account and associated data by contacting us &mdash; we'll retain only what the law requires us to keep, and delete the rest.</p>
+      </section>
+
+      <section id="rights">
+        <h2><span class="num">08</span>Your rights</h2>
+        <p>Under Saudi Arabia's Personal Data Protection Law (PDPL), you can request access to, correction of, or deletion of personal data we hold about you or, as the merchant, about your customers. Contact us at <a href="mailto:info@zaterp.com">info@zaterp.com</a> to make a request.</p>
+      </section>
+
+      <section id="children">
+        <h2><span class="num">09</span>Children</h2>
+        <p>ZAT POS is a business tool for merchants and staff. It is not directed at children, and we do not knowingly collect data from children through the app.</p>
+      </section>
+
+      <section id="changes">
+        <h2><span class="num">10</span>Changes to this policy</h2>
+        <p>If we make material changes to this policy, we will update the effective date above and, where appropriate, notify account owners in-app or by email.</p>
+      </section>
+
+      <section id="contact">
+        <h2><span class="num">11</span>Contact</h2>
+        <p>ZAT POS, Saudi Arabia<br>
+        Email: <a href="mailto:info@zaterp.com">info@zaterp.com</a></p>
+      </section>
+
+      <footer>
+        ZAT POS Privacy Policy &middot; Doc PP-1.0 &middot; Effective 24 Sep 2026
+      </footer>
+    </main>
+  </div>
+</div>
+</body>
+</html>

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  The app talks to two kinds of endpoints:
+   - the ZAT backend (https://zaterp.com) — always HTTPS, unaffected by this file.
+   - local network thermal printers (LAN IP or 127.0.0.1) entered by the user at
+     runtime, reached over plain HTTP (ESC/POS printers do not serve HTTPS).
+  Since API 28+ blocks cleartext traffic by default, printing would silently fail
+  without this override. Cleartext is permitted only for local network traffic;
+  it does not affect the HTTPS connection to the backend.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
