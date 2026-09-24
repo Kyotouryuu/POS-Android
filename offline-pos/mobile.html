@@ -274,6 +274,21 @@
             @input="onPrimarySearchInput" @keydown.enter="addFirstSearchResult"
             style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;">
 
+        <!-- Permanent live product search bar — results replace the grid below in real time -->
+        <div class="relative bg-white flex-shrink-0 px-3 pt-2 pb-1.5" style="box-shadow:0 1px 0 rgba(12,26,46,0.06);">
+            <div class="relative">
+                <i class="fas fa-magnifying-glass absolute start-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
+                <input type="text" v-model="productSearch"
+                    @input="onPrimarySearchInput" @keydown.enter="addFirstSearchResult"
+                    :placeholder="t('search_placeholder')"
+                    class="w-full ps-9 pe-8 h-9 text-sm bg-slate-100 border border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:bg-white transition placeholder-slate-400">
+                <button v-if="productSearch" @click="productSearch = ''"
+                    class="absolute end-1.5 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center text-slate-400 active:text-slate-600">
+                    <i class="fas fa-xmark text-xs"></i>
+                </button>
+            </div>
+        </div>
+
         <!-- Filter row: scrollable chips + fixed action buttons -->
         <div class="relative flex items-center bg-white flex-shrink-0" style="box-shadow:0 1px 0 rgba(12,26,46,0.06);">
             <div class="flex gap-2 ps-3 pe-2 py-2 overflow-x-auto scrollbar-thin flex-1">
@@ -290,10 +305,6 @@
                     class="w-9 h-9 flex items-center justify-center rounded-xl active:bg-slate-100"
                     :class="mobileProductViewMode === 'list' ? 'text-amber-500' : 'text-slate-500'">
                     <i class="fas text-sm" :class="mobileProductViewMode === 'grid' ? 'fa-list' : 'fa-table-cells-large'"></i>
-                </button>
-                <button @click="showManualSearchModal = true; manualSearchQuery = ''; manualSearchCategoryId = ''; manualSearchBrandId = ''; manualSearchQty = 1"
-                    class="w-9 h-9 flex items-center justify-center rounded-xl text-slate-500 active:bg-slate-100 active:text-amber-600">
-                    <i class="fas fa-magnifying-glass text-sm"></i>
                 </button>
                 <button @click="startCameraBarcodeScan"
                     class="w-9 h-9 flex items-center justify-center rounded-xl text-slate-500 active:bg-slate-100 active:text-amber-600">
@@ -350,64 +361,98 @@
 
         <!-- Product grid (virtual scroll — same refs/handler as desktop) -->
         <div ref="gridEl" @scroll="onGridScroll" class="flex-1 p-3 overflow-auto scrollbar-thin bg-slate-50" style="padding-bottom: 96px;">
-            <div v-if="productsReady && displayProducts.length === 0" class="flex flex-col items-center justify-center h-full text-center py-10">
-                <div class="w-16 h-16 rounded-2xl bg-slate-200 flex items-center justify-center mb-4">
-                    <i class="fas fa-box-open text-2xl text-slate-400"></i>
+            <!-- Live search results — replaces the grid below in real time while searching -->
+            <template v-if="productSearch">
+                <div v-if="mobileSearchResults.length === 0" class="flex flex-col items-center justify-center h-full text-center py-10">
+                    <div class="w-16 h-16 rounded-2xl bg-slate-200 flex items-center justify-center mb-4">
+                        <i class="fas fa-box-open text-2xl text-slate-400"></i>
+                    </div>
+                    <p class="text-slate-500 font-medium text-sm">{{ t('no_matching_products') }}</p>
                 </div>
-                <p class="text-slate-500 font-medium text-sm mb-1">{{ t('no_products') }}</p>
-                <p class="text-slate-400 text-xs">{{ t('no_products_hint') }}</p>
-            </div>
-            <div v-else-if="mobileProductViewMode === 'grid'" class="m-product-grid">
-                <div :style="{ height: vTopPad + 'px', gridColumn: '1 / -1' }"></div>
-                <div v-for="p in visibleProducts" :key="p.id" @click="addToCart(p)"
-                    class="m-product-card relative bg-white border border-slate-100 cursor-pointer overflow-hidden p-2.5">
-                    <div v-if="p.enable_stock" class="m-stock-flag absolute top-2.5 start-0 z-10 text-[10px] font-bold pe-2.5 py-0.5 leading-none"
-                        :class="p.qty_available > 5 ? 'bg-slate-700 text-white' : p.qty_available > 0 ? 'bg-amber-400 text-amber-950' : 'bg-rose-500 text-white'">
-                        {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
-                    </div>
-                    <div class="rounded-xl overflow-hidden bg-slate-50 aspect-square flex items-center justify-center mb-2.5">
-                        <img v-if="p.image" :src="p.image" class="w-full h-full object-cover" @error="p.image = null">
-                        <div v-else class="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 flex flex-col items-center justify-center">
-                            <i class="fas fa-image mb-1 text-lg"></i>
+                <div v-else class="space-y-2">
+                    <div v-for="p in mobileSearchResults" :key="p.id" @click="addToCart(p)"
+                        class="m-product-row relative bg-white rounded-xl cursor-pointer px-3 py-2 flex items-center gap-3"
+                        style="box-shadow:0 1px 3px rgba(12,26,46,.07), 0 1px 2px rgba(12,26,46,.04);">
+                        <div class="w-10 h-10 rounded-lg overflow-hidden bg-slate-50 flex items-center justify-center flex-shrink-0">
+                            <img v-if="p.image" :src="p.image" class="w-full h-full object-cover" @error="p.image = null">
+                            <div v-else class="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 flex items-center justify-center">
+                                <i class="fas fa-image text-xs"></i>
+                            </div>
                         </div>
-                    </div>
-                    <div class="font-bold text-slate-800 truncate leading-tight text-[13px] mb-0.5">{{ p.name }}</div>
-                    <div class="text-[10px] text-slate-400 truncate">{{ p.sku }}</div>
-                    <div class="m-card-footer flex items-center justify-between">
-                        <div class="m-mono font-extrabold text-sm text-amber-300">{{ fmt(p.sell_price_inc_tax) }}</div>
-                        <div class="w-7 h-7 rounded-full flex items-center justify-center text-[11px] -mt-0.5"
-                            :style="p.enable_stock && p.qty_available <= 0 ? 'background:#475569; color:#fff;' : 'background:linear-gradient(135deg,var(--z-gold),var(--z-gold-d)); color:var(--z-navy);'">
-                            <i class="fas fa-plus"></i>
+                        <div class="min-w-0 flex-1">
+                            <div class="font-semibold text-slate-800 truncate text-[13px] leading-snug">{{ p.name }}</div>
+                            <div class="flex items-center gap-1.5 mt-0.5">
+                                <span class="text-[10px] text-slate-400 truncate">{{ p.sku }}</span>
+                                <span v-if="p.enable_stock" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none flex-shrink-0"
+                                    :class="p.qty_available > 5 ? 'bg-slate-100 text-slate-400' : p.qty_available > 0 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'">
+                                    {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
+                                </span>
+                            </div>
                         </div>
+                        <div class="m-mono font-extrabold text-sm flex-shrink-0" style="color:var(--z-gold-d);">{{ fmt(p.sell_price_inc_tax) }}</div>
                     </div>
                 </div>
-                <div :style="{ height: vBottomPad + 'px', gridColumn: '1 / -1' }"></div>
-            </div>
-            <div v-else class="space-y-2">
-                <div :style="{ height: mListTopPad + 'px' }"></div>
-                <div v-for="p in mListVisibleProducts" :key="p.id" @click="addToCart(p)"
-                    class="m-product-row relative bg-white rounded-xl cursor-pointer px-3 py-2 flex items-center gap-3"
-                    style="box-shadow:0 1px 3px rgba(12,26,46,.07), 0 1px 2px rgba(12,26,46,.04);">
-                    <div class="w-10 h-10 rounded-lg overflow-hidden bg-slate-50 flex items-center justify-center flex-shrink-0">
-                        <img v-if="p.image" :src="p.image" class="w-full h-full object-cover" @error="p.image = null">
-                        <div v-else class="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 flex items-center justify-center">
-                            <i class="fas fa-image text-xs"></i>
-                        </div>
+            </template>
+            <template v-else>
+                <div v-if="productsReady && displayProducts.length === 0" class="flex flex-col items-center justify-center h-full text-center py-10">
+                    <div class="w-16 h-16 rounded-2xl bg-slate-200 flex items-center justify-center mb-4">
+                        <i class="fas fa-box-open text-2xl text-slate-400"></i>
                     </div>
-                    <div class="min-w-0 flex-1">
-                        <div class="font-semibold text-slate-800 truncate text-[13px] leading-snug">{{ p.name }}</div>
-                        <div class="flex items-center gap-1.5 mt-0.5">
-                            <span class="text-[10px] text-slate-400 truncate">{{ p.sku }}</span>
-                            <span v-if="p.enable_stock" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none flex-shrink-0"
-                                :class="p.qty_available > 5 ? 'bg-slate-100 text-slate-400' : p.qty_available > 0 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'">
-                                {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
-                            </span>
-                        </div>
-                    </div>
-                    <div class="m-mono font-extrabold text-sm flex-shrink-0" style="color:var(--z-gold-d);">{{ fmt(p.sell_price_inc_tax) }}</div>
+                    <p class="text-slate-500 font-medium text-sm mb-1">{{ t('no_products') }}</p>
+                    <p class="text-slate-400 text-xs">{{ t('no_products_hint') }}</p>
                 </div>
-                <div :style="{ height: mListBottomPad + 'px' }"></div>
-            </div>
+                <div v-else-if="mobileProductViewMode === 'grid'" class="m-product-grid">
+                    <div :style="{ height: vTopPad + 'px', gridColumn: '1 / -1' }"></div>
+                    <div v-for="p in visibleProducts" :key="p.id" @click="addToCart(p)"
+                        class="m-product-card relative bg-white border border-slate-100 cursor-pointer overflow-hidden p-2.5">
+                        <div v-if="p.enable_stock" class="m-stock-flag absolute top-2.5 start-0 z-10 text-[10px] font-bold pe-2.5 py-0.5 leading-none"
+                            :class="p.qty_available > 5 ? 'bg-slate-700 text-white' : p.qty_available > 0 ? 'bg-amber-400 text-amber-950' : 'bg-rose-500 text-white'">
+                            {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
+                        </div>
+                        <div class="rounded-xl overflow-hidden bg-slate-50 aspect-square flex items-center justify-center mb-2.5">
+                            <img v-if="p.image" :src="p.image" class="w-full h-full object-cover" @error="p.image = null">
+                            <div v-else class="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 flex flex-col items-center justify-center">
+                                <i class="fas fa-image mb-1 text-lg"></i>
+                            </div>
+                        </div>
+                        <div class="font-bold text-slate-800 truncate leading-tight text-[13px] mb-0.5">{{ p.name }}</div>
+                        <div class="text-[10px] text-slate-400 truncate">{{ p.sku }}</div>
+                        <div class="m-card-footer flex items-center justify-between">
+                            <div class="m-mono font-extrabold text-sm text-amber-300">{{ fmt(p.sell_price_inc_tax) }}</div>
+                            <div class="w-7 h-7 rounded-full flex items-center justify-center text-[11px] -mt-0.5"
+                                :style="p.enable_stock && p.qty_available <= 0 ? 'background:#475569; color:#fff;' : 'background:linear-gradient(135deg,var(--z-gold),var(--z-gold-d)); color:var(--z-navy);'">
+                                <i class="fas fa-plus"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div :style="{ height: vBottomPad + 'px', gridColumn: '1 / -1' }"></div>
+                </div>
+                <div v-else class="space-y-2">
+                    <div :style="{ height: mListTopPad + 'px' }"></div>
+                    <div v-for="p in mListVisibleProducts" :key="p.id" @click="addToCart(p)"
+                        class="m-product-row relative bg-white rounded-xl cursor-pointer px-3 py-2 flex items-center gap-3"
+                        style="box-shadow:0 1px 3px rgba(12,26,46,.07), 0 1px 2px rgba(12,26,46,.04);">
+                        <div class="w-10 h-10 rounded-lg overflow-hidden bg-slate-50 flex items-center justify-center flex-shrink-0">
+                            <img v-if="p.image" :src="p.image" class="w-full h-full object-cover" @error="p.image = null">
+                            <div v-else class="w-full h-full bg-gradient-to-br from-slate-100 to-slate-200 text-slate-400 flex items-center justify-center">
+                                <i class="fas fa-image text-xs"></i>
+                            </div>
+                        </div>
+                        <div class="min-w-0 flex-1">
+                            <div class="font-semibold text-slate-800 truncate text-[13px] leading-snug">{{ p.name }}</div>
+                            <div class="flex items-center gap-1.5 mt-0.5">
+                                <span class="text-[10px] text-slate-400 truncate">{{ p.sku }}</span>
+                                <span v-if="p.enable_stock" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none flex-shrink-0"
+                                    :class="p.qty_available > 5 ? 'bg-slate-100 text-slate-400' : p.qty_available > 0 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'">
+                                    {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
+                                </span>
+                            </div>
+                        </div>
+                        <div class="m-mono font-extrabold text-sm flex-shrink-0" style="color:var(--z-gold-d);">{{ fmt(p.sell_price_inc_tax) }}</div>
+                    </div>
+                    <div :style="{ height: mListBottomPad + 'px' }"></div>
+                </div>
+            </template>
         </div>
       </template>
 

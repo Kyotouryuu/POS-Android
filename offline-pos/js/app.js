@@ -994,6 +994,30 @@ createApp({
             return out;
         });
 
+        // Mobile-only: live results for the permanent product-browse search bar.
+        // Honors the same category/brand chips as the product grid; unused by the
+        // desktop template, so desktop's own search dropdown is unaffected.
+        const mobileSearchResults = computed(() => {
+            const q = normSearch(productSearchQ.value);
+            if (!q) return [];
+            const cat = selectedCategory.value ? String(selectedCategory.value) : '';
+            const brd = selectedBrand.value ? String(selectedBrand.value) : '';
+            const sf = searchFields.value;
+            const useName = sf.includes('name');
+            const useSku = sf.includes('sku');
+            const useBarcode = sf.includes('barcode');
+            const out = [];
+            for (const row of productSearchIndex.value) {
+                if (cat && row.categoryId !== cat) continue;
+                if (brd && row.brandId !== brd) continue;
+                const matches = (useName && row.nameN.includes(q)) || (useSku && row.skuN.includes(q)) || (useBarcode && row.barcodeN.includes(q));
+                if (!matches) continue;
+                out.push(row.p);
+                if (out.length >= 100) break;
+            }
+            return out;
+        });
+
         const filteredCustomers = computed(() => {
             const q = (selectedCustomerName.value || '').toLowerCase();
             if (!q) return customers.value.slice(0, 10);
@@ -4731,7 +4755,7 @@ createApp({
             connectPendingToken, connectLocations, connectLocationId, connectSaveBusy,
             openConnectForm, onOtpDigitInput, onOtpDigitKeydown, saveConnection,
             // Computed
-            displayProducts, filteredProducts, filteredCustomers, manualSearchResults,
+            displayProducts, filteredProducts, filteredCustomers, manualSearchResults, mobileSearchResults,
             pricedProducts, recentSalesForTab,
             totalItems, subtotalGross, totalLineDisc, subtotal,
             orderDiscount, orderTaxAmount, grandTotal, totalPaid, balanceDue, changeReturn,
