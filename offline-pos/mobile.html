@@ -273,16 +273,21 @@
             @input="onPrimarySearchInput" @keydown.enter="addFirstSearchResult"
             style="position:absolute;opacity:0;width:1px;height:1px;pointer-events:none;">
 
-        <!-- Filter row: scrollable chips + fixed action buttons -->
-        <div class="relative flex items-center bg-white flex-shrink-0" style="box-shadow:0 1px 0 rgba(12,26,46,0.06);">
-            <div class="flex gap-2 ps-3 pe-2 py-2 overflow-x-auto scrollbar-thin flex-1">
-                <button @click="selectedCategory = null; selectedBrand = null"
-                    :class="!selectedCategory && !selectedBrand ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'"
-                    class="m-chip px-3.5 h-8 rounded-full text-xs font-bold">{{ t('all') }}</button>
-                <button v-for="cat in categories" :key="cat.id" @click="selectedCategory = cat.id; selectedBrand = null"
-                    :class="selectedCategory === cat.id ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'"
-                    class="m-chip px-3.5 h-8 rounded-full text-xs font-bold">{{ cat.name }}</button>
-            </div>
+        <!-- Filter rows: Row 1 = search + action buttons; Row 2 = category chips -->
+        <div class="flex flex-col bg-white flex-shrink-0" style="box-shadow:0 1px 0 rgba(12,26,46,0.06);">
+            <!-- Row 1: search + action buttons -->
+            <div class="relative flex items-center">
+                <div class="flex items-center gap-2 ps-3 pe-2 py-2 flex-1 min-w-0">
+                    <div class="relative flex-1 min-w-0">
+                        <i class="fas fa-magnifying-glass absolute start-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
+                        <input type="text" v-model="manualSearchQuery" :placeholder="t('m_search_short')"
+                            class="w-full ps-8 pe-7 h-8 text-sm text-slate-700 bg-slate-100 rounded-full focus:outline-none focus:ring-2 focus:ring-amber-400/50">
+                        <button v-if="manualSearchQuery" @click="manualSearchQuery = ''"
+                            class="absolute end-2 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center text-slate-400 active:text-slate-600">
+                            <i class="fas fa-xmark text-[9px]"></i>
+                        </button>
+                    </div>
+                </div>
             <!-- Action icon buttons -->
             <div class="flex items-center gap-0.5 pe-2 ps-1 flex-shrink-0 border-s border-slate-100 self-stretch py-1.5">
                 <button @click="mobileProductViewMode = mobileProductViewMode === 'grid' ? 'list' : 'grid'"
@@ -333,20 +338,18 @@
                     </div>
                 </div>
             </div>
-        </div>
-
-        <!-- Search bar -->
-        <div class="relative bg-white flex-shrink-0 px-3 pt-2 pb-1.5" style="box-shadow:0 1px 0 rgba(12,26,46,0.06);">
-            <div class="relative">
-                <i class="fas fa-magnifying-glass absolute start-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
-                <input type="text" v-model="manualSearchQuery" :placeholder="t('m_search_short')"
-                    class="w-full ps-9 pe-8 h-9 text-sm bg-slate-100 border border-transparent rounded-xl focus:outline-none focus:ring-2 focus:ring-amber-400/50 focus:bg-white transition placeholder-slate-400">
-                <button v-if="manualSearchQuery" @click="manualSearchQuery = ''"
-                    class="absolute end-1.5 top-1/2 -translate-y-1/2 w-6 h-6 flex items-center justify-center text-slate-400 active:text-slate-600">
-                    <i class="fas fa-xmark text-xs"></i>
-                </button>
+            </div>
+            <!-- Row 2: category chips -->
+            <div class="flex gap-2 ps-3 pe-3 pb-2 overflow-x-auto scrollbar-thin border-t border-slate-100">
+                <button @click="selectedCategory = null; selectedBrand = null"
+                    :class="!selectedCategory && !selectedBrand ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'"
+                    class="m-chip px-3.5 h-8 rounded-full text-xs font-bold flex-shrink-0">{{ t('all') }}</button>
+                <button v-for="cat in categories" :key="cat.id" @click="selectedCategory = cat.id; selectedBrand = null"
+                    :class="selectedCategory === cat.id ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'"
+                    class="m-chip px-3.5 h-8 rounded-full text-xs font-bold flex-shrink-0">{{ cat.name }}</button>
             </div>
         </div>
+
 
         <!-- Cart total button — tap to go to payment -->
         <button v-if="cart.length > 0" @click="openPaymentModal"
@@ -529,10 +532,7 @@
                             class="w-8 h-8 flex items-center justify-center rounded-lg bg-orange-50 text-orange-500" :title="t('retry')">
                             <i class="fas fa-rotate text-xs"></i>
                         </button>
-                        <button v-if="s.sync_status !== 'synced'" @click="discardLocalUnsyncedSale(s)"
-                            class="w-8 h-8 flex items-center justify-center rounded-lg bg-rose-50 text-rose-500 ms-auto" :title="t('delete_from_device_only')">
-                            <i class="fas fa-trash-can text-xs"></i>
-                        </button>
+
                     </div>
                 </div>
             </template>
@@ -626,20 +626,15 @@
                             @input="connectPendingToken = ''; connectLocations = []; connectLocationId = ''; connectOtpError = ''">
                     </div>
 
-                    <!-- 6-box OTP -->
+                    <!-- OTP input -->
                     <div>
                         <label class="block text-xs font-semibold text-slate-600 mb-2">{{ t('android_otp_label') }}</label>
-                        <div class="grid grid-cols-6 gap-1.5" dir="ltr">
-                            <input v-for="(_, i) in connectOtpDigits" :key="i"
-                                :id="`m-otp-${i}`"
-                                type="text" inputmode="numeric" maxlength="2"
-                                :value="connectOtpDigits[i]"
-                                @input="onOtpDigitInput(i, $event)"
-                                @keydown="onOtpDigitKeydown(i, $event)"
-                                @focus="$event.target.select()"
-                                class="w-full aspect-square border-2 rounded-xl text-center text-lg font-mono font-bold bg-slate-50 focus:outline-none transition-colors"
-                                :class="connectPendingToken ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : connectOtpError ? 'border-red-300' : 'border-slate-200 focus:border-amber-400'">
-                        </div>
+                        <input type="text" inputmode="numeric" maxlength="6" dir="ltr"
+                            :value="connectOtpValue"
+                            @input="onOtpInput"
+                            :placeholder="'— — — — — —'"
+                            class="w-full text-center text-2xl font-mono font-bold tracking-[0.5em] border-2 rounded-xl px-4 py-3 bg-slate-50 focus:outline-none transition-colors"
+                            :class="connectPendingToken ? 'border-emerald-400 bg-emerald-50 text-emerald-700' : connectOtpError ? 'border-red-300' : 'border-slate-200 focus:border-amber-400'">
                         <div v-if="connectOtpBusy" class="flex items-center justify-center gap-2 mt-2 text-xs text-slate-500">
                             <i class="fas fa-spinner fa-spin"></i> {{ t('verifying') }}
                         </div>
@@ -790,6 +785,7 @@
                     :class="manualSearchBrandId == br.id ? 'bg-violet-600 text-white' : 'bg-slate-100 text-slate-600'"
                     class="m-chip px-3.5 h-8 rounded-full text-xs font-bold flex-shrink-0">{{ br.name }}</button>
             </div>
+            <!-- Cart total banner (same as main page) -->
             <button v-if="cart.length > 0" @click="showManualSearchModal = false; openPaymentModal()"
                 class="mx-3 my-2 rounded-2xl flex flex-col items-center justify-center py-4 gap-1 active:brightness-90"
                 style="background:linear-gradient(135deg,var(--z-navy) 0%,var(--z-navy3) 100%);">

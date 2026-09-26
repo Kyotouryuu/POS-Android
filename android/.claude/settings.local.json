@@ -3,7 +3,8 @@
     "allow": [
       "Bash(node *)",
       "Bash(npm install *)",
-      "Bash(npx cap *)"
+      "Bash(npx cap *)",
+      "Bash(git commit *)"
     ]
   }
 }

@@ -355,6 +355,7 @@ createApp({
         const showConnectForm        = ref(false);
         const connectServerUrl       = ref('https://zaterp.com');
         const connectOtpDigits       = ref(['', '', '', '', '', '']);
+        const connectOtpValue        = ref('');
         const connectOtpBusy         = ref(false);
         const connectOtpError        = ref('');
         const connectPendingToken    = ref('');
@@ -2925,6 +2926,7 @@ createApp({
 
         const resetConnectForm = () => {
             connectOtpDigits.value    = ['', '', '', '', '', ''];
+            connectOtpValue.value     = '';
             connectOtpError.value     = '';
             connectPendingToken.value = '';
             connectLocations.value    = [];
@@ -2961,7 +2963,7 @@ createApp({
                         ? t('otp_invalid_or_expired')
                         : (data.message || t('otp_redeem_failed'));
                     connectOtpDigits.value = ['', '', '', '', '', ''];
-                    document.getElementById('m-otp-0')?.focus();
+                    connectOtpValue.value = '';
                     return;
                 }
                 const token = String(data.token || '').trim();
@@ -2986,32 +2988,17 @@ createApp({
             }
         };
 
-        const onOtpDigitInput = (index, event) => {
-            // Handle paste of full code into any box
-            const pasted = event.target.value;
-            if (pasted.length > 1) {
-                const digits = pasted.replace(/\D/g, '').slice(0, 6).split('');
-                digits.forEach((d, i) => { connectOtpDigits.value[i] = d; });
-                event.target.value = connectOtpDigits.value[index] || '';
-                const next = Math.min(digits.length, 5);
-                document.getElementById(`m-otp-${next}`)?.focus();
-                if (connectOtpDigits.value.join('').length === 6) redeemConnectOtp();
-                return;
-            }
-            const val = pasted.replace(/\D/g, '').slice(-1);
-            connectOtpDigits.value[index] = val;
+        const onOtpInput = (event) => {
+            const val = event.target.value.replace(/\D/g, '').slice(0, 6);
+            connectOtpValue.value = val;
             event.target.value = val;
-            if (val && index < 5) {
-                document.getElementById(`m-otp-${index + 1}`)?.focus();
-            }
-            if (connectOtpDigits.value.join('').length === 6) redeemConnectOtp();
+            const digits = val.split('');
+            connectOtpDigits.value = Array.from({ length: 6 }, (_, i) => digits[i] || '');
+            if (val.length === 6) redeemConnectOtp();
         };
 
-        const onOtpDigitKeydown = (index, event) => {
-            if (event.key === 'Backspace' && !connectOtpDigits.value[index] && index > 0) {
-                document.getElementById(`m-otp-${index - 1}`)?.focus();
-            }
-        };
+        const onOtpDigitInput = () => {};
+        const onOtpDigitKeydown = () => {};
 
         const saveConnection = async () => {
             if (!connectPendingToken.value) { toast(t('enter_6_digit_otp'), 'error'); return; }
@@ -4091,6 +4078,16 @@ createApp({
                 await refreshCashRegisterPermissions();
                 restartAutoSyncScheduler();
                 toast(t('account_added_switched'), 'success');
+                if (isOnline.value) {
+                    isSyncing.value = true;
+                    try {
+                        await runStructuredPullSync({ quietSuccessToast: true });
+                    } catch (e) {
+                        addLog('Auto-pull after OTP login failed: ' + e.message, 'error');
+                    } finally {
+                        isSyncing.value = false;
+                    }
+                }
             } catch (e) {
                 addAccountOtpError.value = t('otp_redeem_failed');
             } finally {
@@ -4730,9 +4727,9 @@ createApp({
             profileRegistry, cashierDisplayName, activeProfileEntry, currentLocationName, unsyncedForAccountSwitch,
             showAddAccountModal, addAccountTokenInput, preAccountSwitchBusy,
             addAccountOtpInput, addAccountOtpBusy, addAccountOtpError, addAccountFromOtp,
-            showConnectForm, connectServerUrl, connectOtpDigits, connectOtpBusy, connectOtpError,
+            showConnectForm, connectServerUrl, connectOtpDigits, connectOtpValue, connectOtpBusy, connectOtpError,
             connectPendingToken, connectLocations, connectLocationId, connectSaveBusy,
-            openConnectForm, onOtpDigitInput, onOtpDigitKeydown, saveConnection,
+            openConnectForm, onOtpInput, onOtpDigitInput, onOtpDigitKeydown, saveConnection,
             // Computed
             displayProducts, filteredProducts, filteredCustomers, manualSearchResults,
             pricedProducts, recentSalesForTab,
