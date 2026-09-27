@@ -109,7 +109,8 @@ public class SunmiPrinterManager {
     }
 
     private void injectAvailabilityFlag(boolean value) {
-        String js = "window.__sunmiInnerPrinterAvailable = " + value + ";";
+        String js = "window.__sunmiInnerPrinterAvailable = " + value + ";" +
+            "window.dispatchEvent(new CustomEvent('zat-sunmi-printer-available', { detail: { available: " + value + " } }));";
         bridge.getActivity().runOnUiThread(() ->
             bridge.getWebView().evaluateJavascript(js, null)
         );

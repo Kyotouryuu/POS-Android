@@ -54,7 +54,8 @@ createApp({
         const isScanningBluetoothPrinters = ref(false);
         const selectedBluetoothPrinterInfo = ref(null);    // { name, address } | null
         const wifiPrinterIp              = ref('');
-        const selectedPrinterType        = ref('');        // '' | 'bluetooth' | 'wifi'
+        const selectedPrinterType        = ref('');        // '' | 'bluetooth' | 'wifi' | 'sunmi'
+        const sunmiPrinterAvailable      = ref(false);
 
         // ── Settings tabs & printer CRUD ─────────────────────────────────────
         const settingsTab           = ref('general');
@@ -2324,6 +2325,11 @@ createApp({
                         wifi_printer_ip_address: wifiPrinterIp.value,
                         wifi_printer_name: t('m_wifi_printer'),
                     };
+                } else if (selectedPrinterType.value === 'sunmi' && sunmiPrinterAvailable.value) {
+                    receipt = {
+                        ...receipt,
+                        print_type: 'sunmi_inner',
+                    };
                 }
             }
 
@@ -2612,7 +2618,7 @@ createApp({
         const scanBluetoothPrinters = () => {
             isScanningBluetoothPrinters.value = true;
             try {
-                window.ReactNativeWebView?.postMessage?.(JSON.stringify({ action: 'listBluetoothPrinters' }));
+                window.ReactNativeWebView?.postMessage?.(JSON.stringify({ type: 'request_bluetooth_scan' }));
             } catch { /* ignore */ }
             setTimeout(() => { isScanningBluetoothPrinters.value = false; }, 3000);
         };
@@ -4434,6 +4440,18 @@ createApp({
             window.addEventListener('zat-android-bluetooth-printers', (e) => {
                 bluetoothPrinters.value = (e.detail && e.detail.devices) || [];
             });
+            // Sunmi inner printer availability (fired by SunmiPrinterManager on service connect/disconnect).
+            window.addEventListener('zat-sunmi-printer-available', (e) => {
+                sunmiPrinterAvailable.value = !!(e.detail && e.detail.available);
+                if (sunmiPrinterAvailable.value && !selectedPrinterType.value) {
+                    selectedPrinterType.value = 'sunmi';
+                }
+            });
+            // Seed from flag already set before Vue mounted (service connected early).
+            if (window.__sunmiInnerPrinterAvailable) {
+                sunmiPrinterAvailable.value = true;
+                if (!selectedPrinterType.value) selectedPrinterType.value = 'sunmi';
+            }
 
             await loadSettings();
 
@@ -4762,7 +4780,7 @@ createApp({
             // Mobile (Android) UI + printer picker
             mobileCartOpen, mobileProductViewMode,
             bluetoothPrinters, isScanningBluetoothPrinters, selectedBluetoothPrinterInfo,
-            wifiPrinterIp, selectedPrinterType,
+            wifiPrinterIp, selectedPrinterType, sunmiPrinterAvailable,
             scanBluetoothPrinters, selectBluetoothPrinter, saveWifiPrinterIp,
             // Settings tabs + printer CRUD
             settingsTab, localPrinters, printerPickerOptions,

@@ -340,7 +340,7 @@
             </div>
             </div>
             <!-- Row 2: category chips -->
-            <div class="flex gap-2 ps-3 pe-3 pb-2 overflow-x-auto scrollbar-thin border-t border-slate-100">
+            <div class="flex gap-2 ps-3 pe-3 py-2 overflow-x-auto scrollbar-thin border-t border-slate-100">
                 <button @click="selectedCategory = null; selectedBrand = null"
                     :class="!selectedCategory && !selectedBrand ? 'm-btn-gold' : 'bg-slate-100 text-slate-600'"
                     class="m-chip px-3.5 h-8 rounded-full text-xs font-bold flex-shrink-0">{{ t('all') }}</button>
@@ -353,10 +353,10 @@
 
         <!-- Cart total button — tap to go to payment -->
         <button v-if="cart.length > 0" @click="openPaymentModal"
-            class="mx-3 my-2 flex-shrink-0 rounded-2xl flex flex-col items-center justify-center py-4 gap-1 active:brightness-90"
+            class="mx-3 mt-2 mb-1 flex-shrink-0 rounded-2xl flex flex-col items-center justify-center py-2.5 gap-0.5 active:brightness-90"
             style="background:linear-gradient(135deg,var(--z-navy) 0%,var(--z-navy3) 100%);">
             <span class="text-white/50 text-xs font-semibold">{{ t('items_count_short', { count: totalItems }) }}</span>
-            <span class="m-mono font-extrabold text-3xl tracking-tight" style="color:var(--z-gold-l);">{{ fmt(grandTotal) }}</span>
+            <span class="m-mono font-extrabold text-2xl tracking-tight" style="color:var(--z-gold-l);">{{ fmt(grandTotal) }}</span>
             <span class="text-white/40 text-[10px] flex items-center gap-1">{{ t('payment_title') }} <i class="fas fa-chevron-right text-[8px]"></i></span>
         </button>
 
@@ -465,8 +465,14 @@
                     class="w-full pe-10 ps-4 py-3 text-sm border border-transparent rounded-2xl bg-slate-100 focus:bg-white focus:ring-2 focus:ring-amber-500/50 focus:border-amber-400 transition">
             </div>
             <div class="flex gap-2 overflow-x-auto scrollbar-thin">
-                <input type="date" v-model="salesDateFrom" class="border-0 rounded-full px-3 h-9 text-xs bg-slate-100 flex-shrink-0 font-semibold text-slate-600">
-                <input type="date" v-model="salesDateTo" class="border-0 rounded-full px-3 h-9 text-xs bg-slate-100 flex-shrink-0 font-semibold text-slate-600">
+                <label class="flex items-center gap-1.5 bg-slate-100 rounded-full px-3 h-9 flex-shrink-0 cursor-pointer">
+                    <span class="text-xs font-bold text-slate-400">{{ t('date_from') }}</span>
+                    <input type="date" v-model="salesDateFrom" class="border-0 bg-transparent text-xs font-semibold text-slate-600 focus:outline-none w-28">
+                </label>
+                <label class="flex items-center gap-1.5 bg-slate-100 rounded-full px-3 h-9 flex-shrink-0 cursor-pointer">
+                    <span class="text-xs font-bold text-slate-400">{{ t('date_to') }}</span>
+                    <input type="date" v-model="salesDateTo" class="border-0 bg-transparent text-xs font-semibold text-slate-600 focus:outline-none w-28">
+                </label>
                 <select v-model="salesStatusFilter" class="border-0 rounded-full px-3 h-9 text-xs bg-slate-100 flex-shrink-0 text-slate-600 font-semibold">
                     <option value="">{{ t('all_statuses') }}</option>
                     <option value="paid">{{ t('status_paid') }}</option>
@@ -677,7 +683,10 @@
                 <div class="rounded-xl border border-slate-200 px-4 py-3 bg-slate-50">
                     <div class="text-[11px] text-slate-400 mb-0.5">{{ t('m_selected_printer') }}</div>
                     <div class="text-sm font-semibold text-slate-700">
-                        <template v-if="selectedPrinterType === 'bluetooth' && selectedBluetoothPrinterInfo">
+                        <template v-if="selectedPrinterType === 'sunmi' && sunmiPrinterAvailable">
+                            <i class="fas fa-print text-amber-500 me-1"></i>{{ t('m_sunmi_inner_printer') }}
+                        </template>
+                        <template v-else-if="selectedPrinterType === 'bluetooth' && selectedBluetoothPrinterInfo">
                             <i class="fab fa-bluetooth-b text-amber-500 me-1"></i>{{ selectedBluetoothPrinterInfo.name || selectedBluetoothPrinterInfo.address }}
                         </template>
                         <template v-else-if="selectedPrinterType === 'wifi' && wifiPrinterIp">
@@ -686,6 +695,16 @@
                         <template v-else><span class="text-slate-400 font-normal">{{ t('m_none_selected') }}</span></template>
                     </div>
                 </div>
+                <!-- Sunmi inner printer (only shown on Sunmi devices) -->
+                <div v-if="sunmiPrinterAvailable"
+                    @click="selectedPrinterType = selectedPrinterType === 'sunmi' ? '' : 'sunmi'"
+                    class="flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer"
+                    :class="selectedPrinterType === 'sunmi' ? 'bg-amber-50 border-amber-300' : 'border-slate-200'">
+                    <i class="fas fa-print text-slate-400"></i>
+                    <div class="flex-1 text-sm font-semibold text-slate-800">{{ t('m_sunmi_inner_printer') }}</div>
+                    <i v-if="selectedPrinterType === 'sunmi'" class="fas fa-circle-check text-amber-600"></i>
+                </div>
+
                 <div class="flex items-center justify-between">
                     <span class="text-sm font-semibold text-slate-700"><i class="fab fa-bluetooth-b text-amber-500 me-1.5"></i>{{ t('m_bluetooth_printers') }}</span>
                     <button @click="scanBluetoothPrinters" :disabled="isScanningBluetoothPrinters"

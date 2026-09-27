@@ -90,6 +90,8 @@ window.I18N = {
 
     // Sales list
     sales_search_placeholder: 'فاتورة / عميل…',
+    date_from: 'من',
+    date_to: 'إلى',
     all_statuses: 'كل الحالات',
     status_paid: 'مدفوع',
     status_partial: 'جزئي',
@@ -835,6 +837,7 @@ window.I18N = {
     m_server_section: 'الخادم والمزامنة',
     m_printers_section: 'الطابعة',
     m_language_section: 'اللغة',
+    m_sunmi_inner_printer: 'طابعة Sunmi الداخلية',
     m_bluetooth_printers: 'طابعات البلوتوث',
     m_scan: 'مسح',
     m_scanning: 'جارٍ البحث…',
@@ -951,6 +954,8 @@ window.I18N = {
 
     // Sales list
     sales_search_placeholder: 'Invoice / customer…',
+    date_from: 'From',
+    date_to: 'To',
     all_statuses: 'All statuses',
     status_paid: 'Paid',
     status_partial: 'Partial',
@@ -1696,6 +1701,7 @@ window.I18N = {
     m_server_section: 'Server & sync',
     m_printers_section: 'Printer',
     m_language_section: 'Language',
+    m_sunmi_inner_printer: 'Sunmi Inner Printer',
     m_bluetooth_printers: 'Bluetooth printers',
     m_scan: 'Scan',
     m_scanning: 'Scanning…',
