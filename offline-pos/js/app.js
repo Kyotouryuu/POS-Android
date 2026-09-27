@@ -2520,7 +2520,9 @@ createApp({
             sublocation.value = subloc?.data ?? null;
 
             const asRec = await db.settings.get('auto_sync_interval_seconds');
+            const asNextRec = await db.settings.get('auto_sync_next_fire_at');
             if (sublocation.value) {
+                pendingResumeNextFireAt = typeof asNextRec?.data === 'number' ? asNextRec.data : null;
                 autoSyncIntervalSeconds.value = normalizeAutoSyncIntervalSeconds(asRec?.data);
             } else {
                 autoSyncIntervalSeconds.value = null;
@@ -3498,7 +3500,7 @@ createApp({
                     lot_number:           item.lot_number  || null,
                     lot_expiry:           item.lot_expiry  || null,
                     selected_modifiers:   item.selected_modifiers || [],
-                    combo_variations:     item.combo_variations   || [],
+                    combo:                item.combo_variations   || [],
                     unit_multiplier:      +(item.unit_multiplier   || 1),
                 })),
                 payment_lines: (s.payments || []).map(p => ({
@@ -4143,6 +4145,8 @@ createApp({
         };
 
         let autoSyncIntervalId = null;
+        let autoSyncTimeoutId = null;
+        let pendingResumeNextFireAt = null;
         let autoSyncUiTimerId = null;
         let autoSyncInFlight = false;
 
@@ -4150,6 +4154,10 @@ createApp({
             if (autoSyncIntervalId != null) {
                 clearInterval(autoSyncIntervalId);
                 autoSyncIntervalId = null;
+            }
+            if (autoSyncTimeoutId != null) {
+                clearTimeout(autoSyncTimeoutId);
+                autoSyncTimeoutId = null;
             }
             autoSyncNextFireAt.value = null;
         };
@@ -4212,14 +4220,37 @@ createApp({
             stopAutoSyncScheduler();
             if (!autoSyncIntervalSeconds.value || !sublocation.value || !hasSyncCredentials()) return;
             const periodMs = autoSyncIntervalSeconds.value * 1000;
-            autoSyncNextFireAt.value = Date.now() + periodMs;
-            autoSyncIntervalId = setInterval(() => {
+            const now = Date.now();
+
+            // On first start after app reopen, resume from persisted fire time (consumed once)
+            const resumeAt = pendingResumeNextFireAt;
+            pendingResumeNextFireAt = null;
+
+            // If a valid future time was saved, honour it; if overdue, fire in 2s; else fresh interval
+            const firstFireAt = (resumeAt != null && resumeAt > now + 2000)
+                ? resumeAt
+                : (resumeAt != null ? now + 2000 : now + periodMs);
+
+            autoSyncNextFireAt.value = firstFireAt;
+            void db.settings.put({ key: 'auto_sync_next_fire_at', data: firstFireAt });
+
+            autoSyncTimeoutId = setTimeout(() => {
+                autoSyncTimeoutId = null;
                 const sec = autoSyncIntervalSeconds.value;
                 if (!sec || !sublocation.value) return;
                 const p = sec * 1000;
                 autoSyncNextFireAt.value = Date.now() + p;
+                void db.settings.put({ key: 'auto_sync_next_fire_at', data: autoSyncNextFireAt.value });
                 void maybeRunAutoSyncCycle();
-            }, periodMs);
+                // Fallback interval in case maybeRunAutoSyncCycle returns early without restarting
+                autoSyncIntervalId = setInterval(() => {
+                    const s2 = autoSyncIntervalSeconds.value;
+                    if (!s2 || !sublocation.value) return;
+                    autoSyncNextFireAt.value = Date.now() + s2 * 1000;
+                    void db.settings.put({ key: 'auto_sync_next_fire_at', data: autoSyncNextFireAt.value });
+                    void maybeRunAutoSyncCycle();
+                }, p);
+            }, firstFireAt - now);
         };
 
         watch([autoSyncIntervalSeconds, sublocation, () => settings.value.serverUrl, () => settings.value.apiKey], () => {
