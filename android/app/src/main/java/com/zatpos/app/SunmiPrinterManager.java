@@ -63,6 +63,10 @@ public class SunmiPrinterManager {
         return available && woyouService != null;
     }
 
+    public void sendAvailabilityStatus() {
+        injectAvailabilityFlag(isAvailable());
+    }
+
     public void handlePrintReceipt(JSONObject msg) {
         new Thread(() -> {
             String requestId = msg.optString("requestId", null);

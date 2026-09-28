@@ -1,6 +1,7 @@
 package com.zatpos.app;
 
 import android.Manifest;
+import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
@@ -10,6 +11,7 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.util.Base64;
 import android.util.Log;
+import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 import com.getcapacitor.Bridge;
 import org.json.JSONArray;
@@ -25,18 +27,68 @@ public class BluetoothPrinterManager {
 
     private final Context context;
     private final Bridge bridge;
+    private String pendingScanRequestId = null;
 
     public BluetoothPrinterManager(Context context, Bridge bridge) {
         this.context = context;
         this.bridge = bridge;
     }
 
+    /**
+     * Called when the user taps Scan. Checks permission first — if missing,
+     * requests it from the Activity and stores the requestId for after the grant.
+     * If already granted, scans immediately.
+     */
+    public void requestScan(Activity activity, String requestId, int permissionRequestCode) {
+        boolean hasPermission = hasConnectPermission();
+        boolean needsRuntime = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S;
+        boolean canShowDialog = !needsRuntime || ActivityCompat.shouldShowRequestPermissionRationale(
+                activity, Manifest.permission.BLUETOOTH_CONNECT);
+
+        // Fire an ack immediately so the JS overlay can see what Java observed
+        sendScanAck(requestId, hasPermission, canShowDialog || !needsRuntime);
+
+        if (hasPermission) {
+            sendPairedDevices(requestId);
+        } else if (needsRuntime) {
+            pendingScanRequestId = requestId;
+            ActivityCompat.requestPermissions(activity, new String[]{
+                Manifest.permission.BLUETOOTH_CONNECT,
+                Manifest.permission.BLUETOOTH_SCAN
+            }, permissionRequestCode);
+        } else {
+            sendPairedDevices(requestId);
+        }
+    }
+
+    private void sendScanAck(String requestId, boolean permissionGranted, boolean canRequest) {
+        try {
+            JSONObject detail = new JSONObject();
+            if (requestId != null) detail.put("requestId", requestId);
+            detail.put("permission_granted", permissionGranted);
+            detail.put("can_request_permission", canRequest);
+            detail.put("sdk_int", Build.VERSION.SDK_INT);
+            dispatchCustomEvent("zat-android-bt-scan-ack", detail);
+        } catch (Exception e) {
+            Log.e(TAG, "sendScanAck error: " + e.getMessage());
+        }
+    }
+
+    /** Called by MainActivity after BLUETOOTH_CONNECT is granted. */
+    public void onPermissionGranted() {
+        String rid = pendingScanRequestId;
+        pendingScanRequestId = null;
+        sendPairedDevices(rid);
+    }
+
     public void sendPairedDevices(String requestId) {
         new Thread(() -> {
             try {
-                JSONArray devices = new JSONArray();
+                boolean hasPermission = hasConnectPermission();
                 BluetoothAdapter adapter = getBluetoothAdapter();
-                if (adapter != null && hasConnectPermission()) {
+                boolean btEnabled = adapter != null && adapter.isEnabled();
+                JSONArray devices = new JSONArray();
+                if (adapter != null && hasPermission) {
                     for (BluetoothDevice device : adapter.getBondedDevices()) {
                         JSONObject d = new JSONObject();
                         d.put("name", device.getName() != null ? device.getName() : "Unknown");
@@ -46,6 +98,8 @@ public class BluetoothPrinterManager {
                 }
                 JSONObject detail = new JSONObject();
                 detail.put("devices", devices);
+                detail.put("permission_granted", hasPermission);
+                detail.put("bluetooth_enabled", btEnabled);
                 if (requestId != null) detail.put("requestId", requestId);
                 dispatchCustomEvent("zat-android-bluetooth-devices", detail);
             } catch (Exception e) {
