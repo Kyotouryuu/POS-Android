@@ -2619,6 +2619,7 @@ createApp({
         /** Ask the native Android shell to (re)send its paired-Bluetooth-device list. */
         const scanBluetoothPrinters = () => {
             isScanningBluetoothPrinters.value = true;
+            window.showBluetoothScanDebug?.();
             try {
                 window.ReactNativeWebView?.postMessage?.(JSON.stringify({ type: 'request_bluetooth_scan' }));
             } catch { /* ignore */ }
@@ -4478,11 +4479,14 @@ createApp({
                     selectedPrinterType.value = 'sunmi';
                 }
             });
-            // Seed from flag already set before Vue mounted (service connected early).
+            // Seed from flag set before Vue mounted (service connected early).
             if (window.__sunmiInnerPrinterAvailable) {
                 sunmiPrinterAvailable.value = true;
                 if (!selectedPrinterType.value) selectedPrinterType.value = 'sunmi';
             }
+            // Query the Java side for current status — catches the timing race where
+            // onServiceConnected fired before the page finished loading.
+            window.ReactNativeWebView?.postMessage?.(JSON.stringify({ type: 'check_sunmi_available' }));
 
             await loadSettings();
 
@@ -4707,6 +4711,31 @@ createApp({
                 restartAutoSyncScheduler();
             });
             window.addEventListener('offline', () => { isOnline.value = false; toast(t('connection_lost'), 'error'); });
+        }
+
+        // ─── Android hardware back button ───
+        if (window.api?.isCapacitor?.()) {
+            try {
+                const { App: CapApp } = window.Capacitor.Plugins;
+                CapApp.addListener('backButton', () => {
+                    // Dismiss deepest layer first, then panels, then pages, then minimize
+                    if (showPaymentModal.value)       { showPaymentModal.value = false; return; }
+                    if (showDiscountModal.value)      { showDiscountModal.value = false; return; }
+                    if (showLineEditModal.value)      { showLineEditModal.value = false; return; }
+                    if (showAddAccountModal.value)    { showAddAccountModal.value = false; return; }
+                    if (showCloseRegisterModal.value) { showCloseRegisterModal.value = false; return; }
+                    if (showOpenRegisterModal.value)  { showOpenRegisterModal.value = false; return; }
+                    if (showHeldSalesModal.value)     { showHeldSalesModal.value = false; return; }
+                    if (showBrandDrawer.value)        { showBrandDrawer.value = false; return; }
+                    if (viewingSale.value)            { viewingSale.value = null; return; }
+                    if (showSyncPanel.value)          { showSyncPanel.value = false; return; }
+                    if (!sideNavCollapsed.value)      { sideNavCollapsed.value = true; return; }
+                    if (currentPage.value !== 'pos')  { currentPage.value = 'pos'; return; }
+                    CapApp.minimizeApp();
+                });
+            } catch (e) {
+                console.warn('Could not register back button handler:', e);
+            }
         }
 
         // ════════════════════════════════════════════════════════════════════

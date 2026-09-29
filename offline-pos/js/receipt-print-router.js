@@ -45,6 +45,9 @@
             if (type === 'wifi_android' && typeof tray.printViaAndroidWifiBridge === 'function') {
                 return tray.printViaAndroidWifiBridge(receipt);
             }
+            if (type === 'sunmi_inner' && typeof tray.printViaSunmiAndroidBridge === 'function') {
+                return tray.printViaSunmiAndroidBridge(receipt);
+            }
             if (type === 'printer' && typeof tray.printReceipt === 'function') {
                 var cfg = (receipt && receipt.printer_config) || {};
                 // Prefer the Windows/tray device name over a friendly display label.

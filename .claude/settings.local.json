@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npx cap *)"
+      "Bash(npx cap *)",
+      "Bash(.\\\\gradlew.bat compileDebugJavaWithJavac)",
+      "Bash(cmd.exe /c \"gradlew.bat compileDebugJavaWithJavac 2>&1\")",
+      "Bash(cmd.exe /c \"gradlew.bat compileDebugJavaWithJavac --info 2>&1\")"
     ]
   }
 }

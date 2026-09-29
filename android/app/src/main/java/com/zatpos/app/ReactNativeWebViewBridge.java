@@ -42,9 +42,13 @@ public class ReactNativeWebViewBridge {
                     break;
                 case "get_bluetooth_printers":
                 case "request_bluetooth_scan":
-                    bridge.getActivity().runOnUiThread(() ->
-                        btManager.requestScan(bridge.getActivity(), requestId, BT_PERMISSIONS_REQUEST)
-                    );
+                    android.app.Activity act = bridge.getActivity();
+                    if (act != null) {
+                        act.runOnUiThread(() -> {
+                            android.app.Activity a = bridge.getActivity();
+                            if (a != null) btManager.requestScan(a, requestId, BT_PERMISSIONS_REQUEST);
+                        });
+                    }
                     break;
                 case "check_sunmi_available":
                     sunmiManager.sendAvailabilityStatus();

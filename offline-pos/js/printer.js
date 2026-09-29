@@ -120,9 +120,12 @@ function normalizeUsbPrinterDevices(devices) {
         });
 }
 
-function setAvailableBluetoothPrinters(devices, requestId = null) {
-    androidBluetoothPrintersCache = normalizeBluetoothPrinterDevices(devices);
+function setAvailableBluetoothPrinters(devices, requestId = null, meta = null) {
+    var raw = Array.isArray(devices) ? devices : [];
+    androidBluetoothPrintersCache = normalizeBluetoothPrinterDevices(raw);
     console.log('Normalized bluetooth printers cache:', androidBluetoothPrintersCache);
+
+    updateBluetoothScanDebug(raw, androidBluetoothPrintersCache.slice(), meta);
 
     if (window.printerTray && typeof window.printerTray.updateBluetoothDropdown === 'function') {
         window.printerTray.updateBluetoothDropdown(androidBluetoothPrintersCache.slice());
@@ -237,9 +240,9 @@ function handleBluetoothPrintersMessageEvent(event) {
     handleBridgeMessageEvent(event);
 }
 
-window.printerTray.setAvailableBluetoothPrinters = function(devices, requestId) {
+window.printerTray.setAvailableBluetoothPrinters = function(devices, requestId, meta) {
     console.log('Received bluetooth printers:', devices);
-    return setAvailableBluetoothPrinters(devices, requestId);
+    return setAvailableBluetoothPrinters(devices, requestId, meta);
 };
 window.printerTray.setAvailableUsbPrinters = function(devices, requestId) {
     console.log('Received USB printers:', devices);
@@ -289,14 +292,39 @@ function handleAppBluetoothDevicesEvent(event) {
     if (!detail) {
         return;
     }
-    var devices = Array.isArray(detail.devices) ? detail.devices : (Array.isArray(detail) ? detail : []);
-    if (devices.length) {
-        console.log('Bluetooth devices from app event:', devices);
-        window.printerTray.setAvailableBluetoothPrinters(devices, detail.requestId || null);
-    }
+    var rawDevices = Array.isArray(detail.devices) ? detail.devices : (Array.isArray(detail) ? detail : []);
+    console.log('Bluetooth devices from app event:', rawDevices);
+    window.printerTray.setAvailableBluetoothPrinters(rawDevices, detail.requestId || null, detail);
 }
 window.addEventListener(ANDROID_APP_BLUETOOTH_DEVICES_EVENT, handleAppBluetoothDevicesEvent);
 document.addEventListener(ANDROID_APP_BLUETOOTH_DEVICES_EVENT, handleAppBluetoothDevicesEvent);
+
+function handleBtScanAckEvent(event) {
+    var detail = event && event.detail;
+    if (!detail) return;
+    var el = document.getElementById(BT_SCAN_DEBUG_ID);
+    if (!el) return;
+
+    var status = el.querySelector('[data-status]');
+    var perm = detail.permission_granted;
+    var canReq = detail.can_request_permission;
+    var sdk = detail.sdk_int;
+
+    btScanDebugLog('Java ack — SDK: <span style="color:#93c5fd;">' + sdk + '</span>' +
+        ' | permission: <span style="color:' + (perm ? '#86efac' : '#f87171') + '">' + (perm ? 'granted' : 'DENIED') + '</span>' +
+        (perm ? '' : ' | can request: <span style="color:' + (canReq ? '#fbbf24' : '#f87171') + '">' + (canReq ? 'yes' : 'NO — go to Settings') + '</span>'));
+
+    if (!perm && !canReq && status) {
+        status.textContent = '✕ Permission permanently denied — open Android Settings > Apps > ZatPOS > Permissions > Nearby Devices';
+        status.style.color = '#f87171';
+        status.style.whiteSpace = 'normal';
+    } else if (!perm && canReq && status) {
+        status.textContent = '⏳ Permission dialog opened — tap Allow';
+        status.style.color = '#fbbf24';
+    }
+}
+window.addEventListener('zat-android-bt-scan-ack', handleBtScanAckEvent);
+document.addEventListener('zat-android-bt-scan-ack', handleBtScanAckEvent);
 
 function handleAppUsbDevicesEvent(event) {
     var detail = event && event.detail;
@@ -393,8 +421,10 @@ function getAvailableUsbPrinters() {
  */
 function requestBluetoothScan() {
     console.log('Bridge available:', isAndroidBridgeAvailable());
+    showBluetoothScanDebug();
     if (!isAndroidBridgeAvailable()) {
         console.warn('Android bridge not available');
+        btScanDebugLog('<span style="color:#f87171;">Bridge not available — ReactNativeWebView missing</span>');
         return;
     }
     window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -1178,6 +1208,169 @@ function showBluetoothPrintDebug(info, payloadSent) {
 
 window.showBluetoothPrintDebug = showBluetoothPrintDebug;
 
+// ─── Bluetooth scan debug overlay ─────────────────────────────────────────────
+
+var BT_SCAN_DEBUG_ID = 'pos_bluetooth_scan_debug';
+
+function btScanDebugLog(msg) {
+    var el = document.getElementById(BT_SCAN_DEBUG_ID);
+    if (!el) return;
+    var ts = new Date().toTimeString().slice(0, 8);
+    var logEl = el.querySelector('[data-log]');
+    if (!logEl) return;
+    var line = document.createElement('div');
+    line.style.cssText = 'border-top:1px solid rgba(255,255,255,0.08);padding:4px 0;word-break:break-all;';
+    line.innerHTML = '<span style="color:#888;margin-right:6px;">' + ts + '</span>' + msg;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+}
+
+function showBluetoothScanDebug() {
+    var existing = document.getElementById(BT_SCAN_DEBUG_ID);
+    if (existing) {
+        existing.style.display = 'flex';
+        btScanDebugLog('<span style="color:#facc15;">── scan triggered ──</span>');
+        return;
+    }
+
+    var el = document.createElement('div');
+    el.id = BT_SCAN_DEBUG_ID;
+    el.style.cssText = [
+        'position:fixed', 'top:40px', 'left:50%', 'transform:translateX(-50%)',
+        'width:min(92vw,540px)', 'max-height:70vh',
+        'background:#111', 'color:#e2e8f0',
+        'font-family:monospace', 'font-size:13px', 'line-height:1.5',
+        'border-radius:10px', 'z-index:99999',
+        'box-shadow:0 8px 32px rgba(0,0,0,0.7)',
+        'display:flex', 'flex-direction:column',
+        'border:1px solid rgba(255,255,255,0.12)',
+        'overflow:hidden'
+    ].join(';');
+
+    // Header
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#1e293b;border-bottom:1px solid rgba(255,255,255,0.1);flex-shrink:0;';
+    var title = document.createElement('span');
+    title.style.cssText = 'font-size:14px;font-weight:bold;color:#93c5fd;letter-spacing:0.5px;';
+    title.textContent = '🔵 Bluetooth Scan Debug';
+
+    var bridge = isAndroidBridgeAvailable();
+    var badge = document.createElement('span');
+    badge.setAttribute('data-bridge-badge', '');
+    badge.style.cssText = 'font-size:11px;padding:2px 8px;border-radius:12px;margin-left:8px;' +
+        (bridge ? 'background:#166534;color:#86efac;' : 'background:#7f1d1d;color:#fca5a5;');
+    badge.textContent = bridge ? 'Bridge OK' : 'Bridge MISSING';
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    closeBtn.style.cssText = 'background:none;border:none;color:#94a3b8;font-size:16px;cursor:pointer;padding:0 4px;margin-left:auto;';
+    closeBtn.onclick = function() { el.style.display = 'none'; };
+
+    header.appendChild(title);
+    header.appendChild(badge);
+    header.appendChild(closeBtn);
+
+    // Status bar
+    var statusBar = document.createElement('div');
+    statusBar.setAttribute('data-status', '');
+    statusBar.style.cssText = 'padding:6px 14px;font-size:12px;color:#fbbf24;background:#1c1917;border-bottom:1px solid rgba(255,255,255,0.07);flex-shrink:0;';
+    statusBar.textContent = 'Waiting for scan result…';
+
+    // Log pane
+    var logEl = document.createElement('div');
+    logEl.setAttribute('data-log', '');
+    logEl.style.cssText = 'flex:1;overflow-y:auto;padding:8px 14px 12px;';
+
+    // Device list pane
+    var devLabel = document.createElement('div');
+    devLabel.style.cssText = 'padding:6px 14px 2px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;flex-shrink:0;border-top:1px solid rgba(255,255,255,0.07);';
+    devLabel.textContent = 'Paired devices';
+
+    var devList = document.createElement('div');
+    devList.setAttribute('data-devices', '');
+    devList.style.cssText = 'padding:4px 14px 12px;max-height:180px;overflow-y:auto;flex-shrink:0;';
+    devList.innerHTML = '<span style="color:#475569;font-size:12px;">none yet</span>';
+
+    el.appendChild(header);
+    el.appendChild(statusBar);
+    el.appendChild(logEl);
+    el.appendChild(devLabel);
+    el.appendChild(devList);
+    document.body.appendChild(el);
+
+    btScanDebugLog('<span style="color:#facc15;">── scan triggered ──</span>');
+    btScanDebugLog('Bridge: <span style="color:' + (bridge ? '#86efac' : '#fca5a5') + '">' + (bridge ? 'available' : 'NOT available') + '</span>');
+}
+
+function updateBluetoothScanDebug(rawDevices, normalizedDevices, meta) {
+    var el = document.getElementById(BT_SCAN_DEBUG_ID);
+    if (!el) return;
+
+    var status = el.querySelector('[data-status]');
+    var devList = el.querySelector('[data-devices]');
+
+    // Update the status bar with permission/BT info if available
+    meta = meta || {};
+    var count = Array.isArray(normalizedDevices) ? normalizedDevices.length : 0;
+    var statusText, statusColor;
+    if (meta.permission_granted === false) {
+        statusText = '✕ Permission denied — tap Scan again to re-request';
+        statusColor = '#f87171';
+    } else if (meta.bluetooth_enabled === false) {
+        statusText = '✕ Bluetooth is off — enable it in Android Settings';
+        statusColor = '#f87171';
+    } else if (count === 0) {
+        statusText = '⚠ No paired devices — pair your printer in Android Bluetooth Settings first';
+        statusColor = '#fbbf24';
+    } else {
+        statusText = '✓ Found ' + count + ' paired device' + (count === 1 ? '' : 's');
+        statusColor = '#86efac';
+    }
+    if (status) {
+        status.textContent = statusText;
+        status.style.color = statusColor;
+    }
+
+    if (meta) {
+        if (meta.permission_granted === false) {
+            btScanDebugLog('<span style="color:#f87171;">BLUETOOTH_CONNECT: DENIED</span>');
+        } else if (meta.permission_granted === true) {
+            btScanDebugLog('<span style="color:#86efac;">BLUETOOTH_CONNECT: granted</span>');
+        }
+        if (meta.bluetooth_enabled === false) {
+            btScanDebugLog('<span style="color:#f87171;">Bluetooth adapter: OFF</span>');
+        } else if (meta.bluetooth_enabled === true) {
+            btScanDebugLog('<span style="color:#86efac;">Bluetooth adapter: on</span>');
+        }
+    }
+    btScanDebugLog('Raw devices received: <span style="color:#93c5fd;">' + JSON.stringify(rawDevices) + '</span>');
+
+    if (count === 0) {
+        if (devList) devList.innerHTML = '<span style="color:#f87171;font-size:12px;">No devices returned — BT off, not paired, or permission denied</span>';
+        return;
+    }
+
+    if (devList) {
+        devList.innerHTML = '';
+        normalizedDevices.forEach(function(d, i) {
+            var row = document.createElement('div');
+            row.style.cssText = 'padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:12px;';
+            row.innerHTML =
+                '<span style="color:#fbbf24;margin-right:6px;">' + (i + 1) + '.</span>' +
+                '<span style="color:#e2e8f0;">' + (d.name || '(no name)') + '</span>' +
+                '<span style="color:#64748b;margin-left:8px;">' + (d.address || '?') + '</span>';
+            devList.appendChild(row);
+        });
+    }
+
+    btScanDebugLog('Normalized: ' + count + ' device(s) → <span style="color:#86efac;">' +
+        normalizedDevices.map(function(d) { return (d.name || '?') + ' [' + d.address + ']'; }).join(', ') +
+        '</span>');
+}
+
+window.showBluetoothScanDebug = showBluetoothScanDebug;
+window.updateBluetoothScanDebug = updateBluetoothScanDebug;
+
 // Send receipt payload to Android app (ReactNative WebView bridge) for bluetooth printing.
 // Prefers print-ready image from POST /print/receipt when receipt.transaction_id is present.
 function printViaAndroidBridge(receipt) {
@@ -1231,11 +1424,18 @@ function printViaAndroidBridge(receipt) {
             return;
         }
 
+        var fetchAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+
         function sendPayload(payload, opts) {
             opts = opts || {};
+            // Remove before adding so we never accumulate duplicate listeners.
+            window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
             window.addEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+            clearTimeout(timeout);
             timeout = setTimeout(function() {
                 window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+                // Abort any in-flight fetch so it doesn't call sendPayload a second time.
+                if (fetchAbortController) fetchAbortController.abort();
                 clearActiveLater();
                 resolve({ requestId: requestId, status: 'sent' });
             }, 4000);
@@ -1305,7 +1505,8 @@ function printViaAndroidBridge(receipt) {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify({ transaction_id: transactionId }),
-                credentials: 'same-origin'
+                credentials: 'same-origin',
+                signal: fetchAbortController ? fetchAbortController.signal : undefined
             }).then(function(res) { return res.json(); }).then(function(data) {
                 var cmdCount = Array.isArray(data.commands) ? data.commands.length : 0;
                 if (data.success && cmdCount > 0) {
@@ -1458,11 +1659,16 @@ function printViaAndroidUsbBridge(receipt) {
             return;
         }
 
+        var fetchAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+
         function sendPayload(payload, opts) {
             opts = opts || {};
+            window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
             window.addEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+            clearTimeout(timeout);
             timeout = setTimeout(function() {
                 window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+                if (fetchAbortController) fetchAbortController.abort();
                 clearActiveLater();
                 resolve({ requestId: requestId, status: 'sent' });
             }, 4000);
@@ -1519,7 +1725,8 @@ function printViaAndroidUsbBridge(receipt) {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify({ transaction_id: transactionId }),
-                credentials: 'same-origin'
+                credentials: 'same-origin',
+                signal: fetchAbortController ? fetchAbortController.signal : undefined
             }).then(function(res) { return res.json(); }).then(function(data) {
                 var cmdCount = Array.isArray(data.commands) ? data.commands.length : 0;
                 if (data.success && cmdCount > 0) {
@@ -1969,6 +2176,63 @@ function printViaAndroidWifiBridge(receipt) {
     });
 }
 
+function printViaSunmiAndroidBridge(receipt) {
+    return new Promise(function(resolve, reject) {
+        if (!isAndroidBridgeAvailable()) {
+            reject(new Error('Android bridge is not available.'));
+            return;
+        }
+
+        var requestId = 'android-sunmi-print-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
+        var timeout = null;
+
+        function onBridgeResult(event) {
+            var detail = event && event.detail ? event.detail : {};
+            if (!detail.requestId || detail.requestId !== requestId) {
+                return;
+            }
+            clearTimeout(timeout);
+            window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+            if (detail.success === false) {
+                reject(new Error(detail.error || 'Sunmi inner print failed.'));
+            } else {
+                resolve(detail);
+            }
+        }
+
+        function sendSunmiPayload(escposB64) {
+            window.addEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+            timeout = setTimeout(function() {
+                window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+                resolve({ requestId: requestId, status: 'sent' });
+            }, 12000);
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'sunmi_inner_print_receipt',
+                requestId: requestId,
+                escpos_base64: escposB64,
+            }));
+        }
+
+        // Prefer server-provided escpos_base64; otherwise render client-side.
+        var inlineB64 = receipt && (receipt.escpos_base64 || receipt.escposBase64)
+            ? String(receipt.escpos_base64 || receipt.escposBase64).trim()
+            : '';
+
+        if (inlineB64) {
+            sendSunmiPayload(inlineB64);
+            return;
+        }
+
+        renderReceiptToThermalCanvas(receipt).then(function(canvas) {
+            var escpos = uint8ToBase64EscPos(escPosGsV0RasterFromCanvas(canvas));
+            sendSunmiPayload(escpos);
+        }).catch(function(err) {
+            console.error('Sunmi: receipt render failed', err);
+            reject(new Error('Sunmi receipt render failed: ' + (err && err.message ? err.message : err)));
+        });
+    });
+}
+
 // Expose helpers globally for other modules
 window.printerTray.getPrinterTrayHealth = getPrinterTrayHealth;
 window.printerTray.getAvailablePrinters = getAvailablePrinters;
@@ -1985,3 +2249,4 @@ window.printerTray.requestUsbPrintersOnLoad = requestUsbPrintersOnLoad;
 window.printerTray.printViaAndroidBridge = printViaAndroidBridge;
 window.printerTray.printViaAndroidUsbBridge = printViaAndroidUsbBridge;
 window.printerTray.printViaAndroidWifiBridge = printViaAndroidWifiBridge;
+window.printerTray.printViaSunmiAndroidBridge = printViaSunmiAndroidBridge;

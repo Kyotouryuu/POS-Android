@@ -89,11 +89,14 @@ public class BluetoothPrinterManager {
                 boolean btEnabled = adapter != null && adapter.isEnabled();
                 JSONArray devices = new JSONArray();
                 if (adapter != null && hasPermission) {
-                    for (BluetoothDevice device : adapter.getBondedDevices()) {
-                        JSONObject d = new JSONObject();
-                        d.put("name", device.getName() != null ? device.getName() : "Unknown");
-                        d.put("address", device.getAddress());
-                        devices.put(d);
+                    java.util.Set<BluetoothDevice> bonded = adapter.getBondedDevices();
+                    if (bonded != null) {
+                        for (BluetoothDevice device : bonded) {
+                            JSONObject d = new JSONObject();
+                            d.put("name", device.getName() != null ? device.getName() : "Unknown");
+                            d.put("address", device.getAddress());
+                            devices.put(d);
+                        }
                     }
                 }
                 JSONObject detail = new JSONObject();
@@ -104,6 +107,15 @@ public class BluetoothPrinterManager {
                 dispatchCustomEvent("zat-android-bluetooth-devices", detail);
             } catch (Exception e) {
                 Log.e(TAG, "sendPairedDevices error: " + e.getMessage());
+                try {
+                    JSONObject err = new JSONObject();
+                    err.put("devices", new JSONArray());
+                    err.put("permission_granted", false);
+                    err.put("bluetooth_enabled", false);
+                    err.put("error", e.getMessage());
+                    if (requestId != null) err.put("requestId", requestId);
+                    dispatchCustomEvent("zat-android-bluetooth-devices", err);
+                } catch (Exception ignored) {}
             }
         }).start();
     }
@@ -163,8 +175,28 @@ public class BluetoothPrinterManager {
         try {
             BluetoothDevice device = adapter.getRemoteDevice(address);
             socket = device.createRfcommSocketToServiceRecord(SPP_UUID);
-            adapter.cancelDiscovery();
-            socket.connect();
+            // cancelDiscovery needs BLUETOOTH_SCAN on API 31+; failure here must not abort the print.
+            try { adapter.cancelDiscovery(); } catch (Exception ignored) {}
+
+            // Connect with a 10-second timeout so the thread doesn't block forever
+            // if the printer is off or out of range.
+            final BluetoothSocket socketRef = socket;
+            final boolean[] connected = {false};
+            final Exception[] connectError = {null};
+            Thread connectThread = new Thread(() -> {
+                try {
+                    socketRef.connect();
+                    connected[0] = true;
+                } catch (Exception e) {
+                    connectError[0] = e;
+                }
+            });
+            connectThread.start();
+            connectThread.join(10000);
+            if (!connected[0]) {
+                Exception err = connectError[0];
+                throw new Exception(err != null ? err.getMessage() : "Bluetooth connection timed out");
+            }
 
             OutputStream out = socket.getOutputStream();
             int offset = 0;
