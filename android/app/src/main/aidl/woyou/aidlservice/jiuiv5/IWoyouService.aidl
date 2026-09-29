@@ -1,7 +1,51 @@
 package woyou.aidlservice.jiuiv5;
 
+import android.graphics.Bitmap;
 import woyou.aidlservice.jiuiv5.ICallback;
 
 interface IWoyouService {
+    void printerInit(in ICallback callback);
+    void printerSelfChecking(in ICallback callback);
+    String getPrinterSerialNo();
+    String getPrinterModel();
+    String getPrinterVersion();
+    String getServiceVersion();
+    void getPrinterPaper(in ICallback callback);
+    void getFirmwareStatus(in ICallback callback);
+    void getHeadClose(in ICallback callback);
+    void printerFeedPaper(int line, in ICallback callback);
+    void printText(String text, in ICallback callback);
+    void printTextWithFont(String text, String typeface, float fontSize, in ICallback callback);
+    void printSpecifiedTypeText(String text, String type, int size, in ICallback callback);
+    void sendTextTablePrint(in String[] colsTextArr, in int[] colsWidthArr, in int[] colsAlign, int lines, in ICallback callback);
+    void printBitmap(in Bitmap bitmap, in ICallback callback);
+    void printBitmapCustom(in Bitmap bitmap, int type, in ICallback callback);
+    void printBarCode(String data, int symbology, int height, int width, int textposition, in ICallback callback);
+    void printQRCode(String data, int modulesize, int errorlevel, in ICallback callback);
+    void print3Line(in ICallback callback);
+    void printRow(in String[] colsTextArr, in int[] colsWidthArr, in int[] colsAlign, in ICallback callback);
+    void setAlignment(int alignment, in ICallback callback);
+    void setFontName(String typeface, in ICallback callback);
+    void setFontSize(float fontSize, in ICallback callback);
     void sendRAWData(in byte[] data, in ICallback callback);
+    void setPrinterStyle(int wtrid, int value, in ICallback callback);
+    void setInternationalCharacter(byte international, in ICallback callback);
+    void setCodeAlignment(int alignment, in ICallback callback);
+    void setLetterSpacing(float space, in ICallback callback);
+    void setLineSpacing(float space, in ICallback callback);
+    void setLeftSpacing(int space, in ICallback callback);
+    void setRecoveryOnErrorCharacter(byte recover, in ICallback callback);
+    void setEscapeCharacter(byte Escape, in ICallback callback);
+    void updatePrinterState(in ICallback callback);
+    void printColumnsText(in String[] colsTextArr, in int[] colsWidthArr, in int[] colsAlign, in ICallback callback);
+    void autoOutPaper(int flag, in ICallback callback);
+    void printBitmapAndPosition(in Bitmap bitmap, int position, in ICallback callback);
+    void printBarCodeAndPosition(String data, int symbology, int height, int width, int textposition, int position, in ICallback callback);
+    void printQRCodeAndPosition(String data, int modulesize, int errorlevel, int position, in ICallback callback);
+    void getNoPrintingReason(in ICallback callback);
+    void setPaperWriteSigns(in ICallback callback);
+    void getlogFiles(String device_sn, int currentPage, in ICallback callback);
+    void printTextBitmapAndPosition(String text, float fontSize, in Bitmap bitmap, int position, in ICallback callback);
+    void getPrintedLength(in ICallback callback);
+    void limitGreyLevel(int degree, in ICallback callback);
 }

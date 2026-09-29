@@ -4,7 +4,10 @@
       "Bash(node *)",
       "Bash(npm install *)",
       "Bash(npx cap *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(xargs grep *)",
+      "Bash(.\\\\gradlew.bat assembleDebug)",
+      "Bash(jar tf *)"
     ]
   }
 }

@@ -3,6 +3,7 @@ package com.zatpos.app;
 import android.Manifest;
 import android.app.Activity;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothClass;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothSocket;
@@ -81,20 +82,48 @@ public class BluetoothPrinterManager {
         sendPairedDevices(rid);
     }
 
+    private void dispatchBtScanLog(String msg) {
+        try {
+            JSONObject d = new JSONObject();
+            d.put("msg", msg);
+            dispatchCustomEvent("zat-android-bt-scan-log", d);
+        } catch (Exception ignored) {}
+    }
+
     public void sendPairedDevices(String requestId) {
         new Thread(() -> {
             try {
+                dispatchBtScanLog("thread started");
                 boolean hasPermission = hasConnectPermission();
+                dispatchBtScanLog("permission: " + hasPermission);
                 BluetoothAdapter adapter = getBluetoothAdapter();
+                dispatchBtScanLog("adapter: " + (adapter == null ? "NULL" : "ok"));
                 boolean btEnabled = adapter != null && adapter.isEnabled();
+                dispatchBtScanLog("bt enabled: " + btEnabled);
                 JSONArray devices = new JSONArray();
                 if (adapter != null && hasPermission) {
+                    dispatchBtScanLog("calling getBondedDevices...");
                     java.util.Set<BluetoothDevice> bonded = adapter.getBondedDevices();
+                    dispatchBtScanLog("bonded set: " + (bonded == null ? "NULL" : bonded.size() + " devices"));
                     if (bonded != null) {
                         for (BluetoothDevice device : bonded) {
+                            String name;
+                            try { name = device.getName(); } catch (Exception e2) { name = "err:" + e2.getMessage(); }
+                            String addr;
+                            try { addr = device.getAddress(); } catch (Exception e2) { addr = "err:" + e2.getMessage(); }
+                            int majorClass = BluetoothClass.Device.Major.UNCATEGORIZED;
+                            try {
+                                BluetoothClass btClass = device.getBluetoothClass();
+                                if (btClass != null) majorClass = btClass.getMajorDeviceClass();
+                            } catch (Exception ignored) {}
+                            // Keep IMAGING (printers/scanners) and UNCATEGORIZED (cheap thermal printers)
+                            boolean isPrinter = (majorClass == BluetoothClass.Device.Major.IMAGING
+                                || majorClass == BluetoothClass.Device.Major.UNCATEGORIZED);
+                            dispatchBtScanLog("device: " + name + " / " + addr + " class=" + majorClass + (isPrinter ? " [PRINTER]" : " [SKIP]"));
+                            if (!isPrinter) continue;
                             JSONObject d = new JSONObject();
-                            d.put("name", device.getName() != null ? device.getName() : "Unknown");
-                            d.put("address", device.getAddress());
+                            d.put("name", name != null ? name : "Unknown");
+                            d.put("address", addr != null ? addr : "");
                             devices.put(d);
                         }
                     }
@@ -104,9 +133,11 @@ public class BluetoothPrinterManager {
                 detail.put("permission_granted", hasPermission);
                 detail.put("bluetooth_enabled", btEnabled);
                 if (requestId != null) detail.put("requestId", requestId);
-                dispatchCustomEvent("zat-android-bluetooth-devices", detail);
+                dispatchBtScanLog("dispatching " + devices.length() + " device(s)...");
+                dispatchDevicesDirectly(detail);
             } catch (Exception e) {
                 Log.e(TAG, "sendPairedDevices error: " + e.getMessage());
+                dispatchBtScanLog("EXCEPTION: " + e.getClass().getSimpleName() + ": " + e.getMessage());
                 try {
                     JSONObject err = new JSONObject();
                     err.put("devices", new JSONArray());
@@ -114,7 +145,7 @@ public class BluetoothPrinterManager {
                     err.put("bluetooth_enabled", false);
                     err.put("error", e.getMessage());
                     if (requestId != null) err.put("requestId", requestId);
-                    dispatchCustomEvent("zat-android-bluetooth-devices", err);
+                    dispatchDevicesDirectly(err);
                 } catch (Exception ignored) {}
             }
         }).start();
@@ -171,33 +202,41 @@ public class BluetoothPrinterManager {
             return;
         }
 
-        BluetoothSocket socket = null;
+        BluetoothDevice device;
         try {
-            BluetoothDevice device = adapter.getRemoteDevice(address);
-            socket = device.createRfcommSocketToServiceRecord(SPP_UUID);
-            // cancelDiscovery needs BLUETOOTH_SCAN on API 31+; failure here must not abort the print.
-            try { adapter.cancelDiscovery(); } catch (Exception ignored) {}
+            device = adapter.getRemoteDevice(address);
+        } catch (Exception e) {
+            sendPrintResult(requestId, false, "Invalid Bluetooth address: " + address);
+            return;
+        }
 
-            // Connect with a 10-second timeout so the thread doesn't block forever
-            // if the printer is off or out of range.
-            final BluetoothSocket socketRef = socket;
-            final boolean[] connected = {false};
-            final Exception[] connectError = {null};
-            Thread connectThread = new Thread(() -> {
-                try {
-                    socketRef.connect();
-                    connected[0] = true;
-                } catch (Exception e) {
-                    connectError[0] = e;
-                }
-            });
-            connectThread.start();
-            connectThread.join(10000);
-            if (!connected[0]) {
-                Exception err = connectError[0];
-                throw new Exception(err != null ? err.getMessage() : "Bluetooth connection timed out");
+        try { adapter.cancelDiscovery(); } catch (Exception ignored) {}
+
+        // Try secure RFCOMM first; many cheap thermal printers don't implement secure
+        // pairing properly, so fall back to insecure if the first attempt fails.
+        BluetoothSocket socket = null;
+        Exception lastError = null;
+        for (boolean insecure : new boolean[]{false, true}) {
+            try {
+                socket = insecure
+                    ? device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
+                    : device.createRfcommSocketToServiceRecord(SPP_UUID);
+                connectWithTimeout(socket, 10000);
+                lastError = null;
+                break;
+            } catch (Exception e) {
+                Log.w(TAG, (insecure ? "Insecure" : "Secure") + " RFCOMM failed: " + e.getMessage());
+                lastError = e;
+                if (socket != null) { try { socket.close(); } catch (Exception ignored) {} socket = null; }
             }
+        }
 
+        if (lastError != null) {
+            sendPrintResult(requestId, false, "Bluetooth connection failed: " + lastError.getMessage());
+            return;
+        }
+
+        try {
             OutputStream out = socket.getOutputStream();
             int offset = 0;
             while (offset < data.length) {
@@ -207,15 +246,27 @@ public class BluetoothPrinterManager {
             }
             out.flush();
             Thread.sleep(200);
-
             sendPrintResult(requestId, true, null);
         } catch (Exception e) {
-            Log.e(TAG, "sendBytesToPrinter error: " + e.getMessage());
-            sendPrintResult(requestId, false, "Bluetooth send error: " + e.getMessage());
+            Log.e(TAG, "sendBytesToPrinter write error: " + e.getMessage());
+            sendPrintResult(requestId, false, "Bluetooth write error: " + e.getMessage());
         } finally {
-            if (socket != null) {
-                try { socket.close(); } catch (Exception ignored) {}
-            }
+            if (socket != null) { try { socket.close(); } catch (Exception ignored) {} }
+        }
+    }
+
+    private void connectWithTimeout(BluetoothSocket socket, long timeoutMs) throws Exception {
+        final boolean[] connected = {false};
+        final Exception[] error = {null};
+        Thread t = new Thread(() -> {
+            try { socket.connect(); connected[0] = true; }
+            catch (Exception e) { error[0] = e; }
+        });
+        t.start();
+        t.join(timeoutMs);
+        if (!connected[0]) {
+            Exception e = error[0];
+            throw new Exception(e != null ? e.getMessage() : "Connection timed out after " + timeoutMs + "ms");
         }
     }
 
@@ -251,6 +302,24 @@ public class BluetoothPrinterManager {
         } catch (Exception e) {
             Log.e(TAG, "sendPrintResult error: " + e.getMessage());
         }
+    }
+
+    private void dispatchDevicesDirectly(JSONObject detail) {
+        String json = detail.toString();
+        // Wrap in try-catch so JS errors surface in the scan debug overlay instead of dying silently.
+        String js = "try{" +
+            "if(typeof window.__onAndroidBluetoothDevices==='function'){" +
+            "window.__onAndroidBluetoothDevices(" + json + ");" +
+            "}else{" +
+            "window.dispatchEvent(new CustomEvent('zat-android-bluetooth-devices',{detail:" + json + "}));" +
+            "document.dispatchEvent(new CustomEvent('zat-android-bluetooth-devices',{detail:" + json + "}));" +
+            "}" +
+            "}catch(e){" +
+            "window.dispatchEvent(new CustomEvent('zat-android-bt-scan-log',{detail:{msg:'JS ERR dispatch: '+e.message}}));" +
+            "}";
+        bridge.getActivity().runOnUiThread(() ->
+            bridge.getWebView().evaluateJavascript(js, null)
+        );
     }
 
     private void dispatchCustomEvent(String eventName, JSONObject detail) {
