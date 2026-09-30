@@ -56,6 +56,7 @@ createApp({
         const wifiPrinterIp              = ref('');
         const selectedPrinterType        = ref('');        // '' | 'bluetooth' | 'wifi' | 'sunmi'
         const sunmiPrinterAvailable      = ref(false);
+        const sunmiPaperWidthMm          = ref(58);       // 58 | 80 — matches paper roll installed
 
         // ── Settings tabs & printer CRUD ─────────────────────────────────────
         const settingsTab           = ref('general');
@@ -1378,7 +1379,44 @@ createApp({
 
         const focusSearch = () => {
             productSearch.value = '';
-            nextTick(() => searchInput.value?.focus());
+            nextTick(() => focusSearchField());
+        };
+
+        // Android WebView opens the soft keyboard for any editable text field, including the
+        // hidden barcode wedge. Keep that field focused for hardware scanners, but never as an
+        // editable input — readonly + inputmode=none does not raise the IME.
+        const focusSearchField = () => {
+            const el = searchInput.value;
+            if (!el) return;
+            if (window.Capacitor) {
+                const active = document.activeElement;
+                if (active && active !== el && typeof active.blur === 'function') active.blur();
+                el.readOnly = true;
+                el.setAttribute('inputmode', 'none');
+                el.focus({ preventScroll: true });
+                return;
+            }
+            el.focus();
+        };
+
+        const onScannerKeydown = (e) => {
+            if (!e.target?.readOnly) return;
+            if (e.key === 'Enter' || e.key === 'Tab') return;
+            if (e.key === 'Backspace') {
+                e.preventDefault();
+                productSearch.value = productSearch.value.slice(0, -1);
+                onPrimarySearchInput();
+                return;
+            }
+            const ch = e.key.length === 1
+                ? e.key
+                : (e.key === 'Unidentified' && e.keyCode >= 32 && e.keyCode <= 126
+                    ? String.fromCharCode(e.keyCode)
+                    : '');
+            if (!ch || e.ctrlKey || e.metaKey || e.altKey) return;
+            e.preventDefault();
+            productSearch.value += ch;
+            onPrimarySearchInput();
         };
 
         const cancelCameraBarcodeScan = async () => {
@@ -1413,7 +1451,11 @@ createApp({
         };
 
         const refocusSearch = () => {
-            nextTick(() => searchInput.value?.focus());
+            nextTick(() => {
+                focusSearchField();
+                // Closing the payment sheet can move focus onto an editable field a frame later.
+                if (window.Capacitor) requestAnimationFrame(() => focusSearchField());
+            });
         };
 
         // ════════════════════════════════════════════════════════════════════
@@ -2326,10 +2368,16 @@ createApp({
                         wifi_printer_name: t('m_wifi_printer'),
                     };
                 } else if (selectedPrinterType.value === 'sunmi' && sunmiPrinterAvailable.value) {
+                    const sunmiWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
                     receipt = {
                         ...receipt,
                         print_type: 'sunmi_inner',
+                        thermal_width: sunmiWidthPx,
                     };
+                } else {
+                    // On Android with no mobile printer configured: block the print and tell the user.
+                    if (!silent) toast(t('m_no_printer_selected') || 'No printer selected. Go to Settings → Printers to choose one.', 'error');
+                    return false;
                 }
             }
 
@@ -2509,6 +2557,7 @@ createApp({
                 selectedPrinterType.value = mobilePrn.data.type || '';
                 selectedBluetoothPrinterInfo.value = mobilePrn.data.bluetooth || null;
                 wifiPrinterIp.value = mobilePrn.data.wifiIp || '';
+                if (mobilePrn.data.sunmiPaperWidthMm) sunmiPaperWidthMm.value = mobilePrn.data.sunmiPaperWidthMm;
                 if (selectedBluetoothPrinterInfo.value && window.zatSetBluetoothPrinter) {
                     window.zatSetBluetoothPrinter(selectedBluetoothPrinterInfo.value);
                 }
@@ -2612,6 +2661,7 @@ createApp({
                     type: selectedPrinterType.value,
                     bluetooth: selectedBluetoothPrinterInfo.value,
                     wifiIp: wifiPrinterIp.value,
+                    sunmiPaperWidthMm: sunmiPaperWidthMm.value,
                 },
             });
         };
@@ -2636,6 +2686,12 @@ createApp({
         const saveWifiPrinterIp = async (ip) => {
             wifiPrinterIp.value = (ip || '').trim();
             selectedPrinterType.value = wifiPrinterIp.value ? 'wifi' : (selectedBluetoothPrinterInfo.value ? 'bluetooth' : '');
+            await persistMobilePrinterConfig();
+        };
+
+        const saveSunmiPaperWidth = async (mm) => {
+            const parsed = parseInt(mm);
+            sunmiPaperWidthMm.value = (parsed === 80) ? 80 : 58;
             await persistMobilePrinterConfig();
         };
 
@@ -4821,6 +4877,7 @@ createApp({
             fmt, fmtDate,
             // Methods
             addToCart, updateQty, removeFromCart, clearCart, resetCart, addFirstSearchResult, focusSearch,
+            onScannerKeydown,
             startCameraBarcodeScan, cancelCameraBarcodeScan, scannerActive,
             confirmClearCart,
             onPrimarySearchInput,
@@ -4841,6 +4898,7 @@ createApp({
             mobileCartOpen, mobileProductViewMode,
             bluetoothPrinters, isScanningBluetoothPrinters, selectedBluetoothPrinterInfo,
             wifiPrinterIp, selectedPrinterType, sunmiPrinterAvailable,
+            sunmiPaperWidthMm, saveSunmiPaperWidth,
             scanBluetoothPrinters, selectBluetoothPrinter, saveWifiPrinterIp,
             // Settings tabs + printer CRUD
             settingsTab, localPrinters, printerPickerOptions,

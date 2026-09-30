@@ -7,6 +7,7 @@ const ANDROID_APP_BLUETOOTH_DEVICES_EVENT = 'zat-android-bluetooth-devices';
 const ANDROID_APP_USB_DEVICES_EVENT = 'zat-android-usb-devices';
 const HTML2CANVAS_CDN_URL = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
 const BLUETOOTH_THERMAL_WIDTH = 576;
+const SUNMI_THERMAL_WIDTH = 384; // 58mm paper at 203dpi — default for most Sunmi handheld/countertop models
 const BLUETOOTH_CAPTURE_WORKSPACE_WIDTH = 320;
 let androidBluetoothPrintersCache = [];
 let androidUsbPrintersCache = [];
@@ -290,14 +291,29 @@ document.addEventListener('message', handleBluetoothPrintersMessageEvent);
 function handleAppBluetoothDevicesEvent(event) {
     var detail = event && event.detail;
     if (!detail) {
+        btScanDebugLog('JS: handleAppBluetoothDevicesEvent — no detail, returning');
         return;
     }
     var rawDevices = Array.isArray(detail.devices) ? detail.devices : (Array.isArray(detail) ? detail : []);
+    btScanDebugLog('JS: handleAppBluetoothDevicesEvent — ' + rawDevices.length + ' device(s)');
     console.log('Bluetooth devices from app event:', rawDevices);
     window.printerTray.setAvailableBluetoothPrinters(rawDevices, detail.requestId || null, detail);
 }
 window.addEventListener(ANDROID_APP_BLUETOOTH_DEVICES_EVENT, handleAppBluetoothDevicesEvent);
 document.addEventListener(ANDROID_APP_BLUETOOTH_DEVICES_EVENT, handleAppBluetoothDevicesEvent);
+
+// Direct-call entry point for Java to bypass CustomEvent (which can fail silently for larger payloads).
+// setTimeout(0) unwinds the evaluateJavascript call stack before processing to avoid stack overflow.
+window.__onAndroidBluetoothDevices = function(detail) {
+    btScanDebugLog('JS: __onAndroidBluetoothDevices called, devices=' + (detail && detail.devices ? detail.devices.length : '?'));
+    setTimeout(function() {
+        try {
+            handleAppBluetoothDevicesEvent({ detail: detail });
+        } catch(e) {
+            btScanDebugLog('JS ERR in __onAndroidBluetoothDevices: ' + e.message);
+        }
+    }, 0);
+};
 
 function handleBtScanAckEvent(event) {
     var detail = event && event.detail;
@@ -325,6 +341,15 @@ function handleBtScanAckEvent(event) {
 }
 window.addEventListener('zat-android-bt-scan-ack', handleBtScanAckEvent);
 document.addEventListener('zat-android-bt-scan-ack', handleBtScanAckEvent);
+
+window.addEventListener('zat-android-bt-scan-log', function(e) {
+    var msg = e && e.detail && e.detail.msg ? e.detail.msg : String(e && e.detail);
+    btScanDebugLog('<span style="color:#93c5fd;">Java: ' + msg + '</span>');
+});
+document.addEventListener('zat-android-bt-scan-log', function(e) {
+    var msg = e && e.detail && e.detail.msg ? e.detail.msg : String(e && e.detail);
+    btScanDebugLog('<span style="color:#93c5fd;">Java: ' + msg + '</span>');
+});
 
 function handleAppUsbDevicesEvent(event) {
     var detail = event && event.detail;
@@ -1023,7 +1048,8 @@ function waitForPrintableAssets(root) {
     });
 }
 
-async function renderReceiptToThermalCanvas(receipt) {
+async function renderReceiptToThermalCanvas(receipt, thermalWidth) {
+    if (!thermalWidth || thermalWidth < 100) thermalWidth = BLUETOOTH_THERMAL_WIDTH;
     await loadHtml2Canvas();
 
     var cleanup = null;
@@ -1057,7 +1083,7 @@ async function renderReceiptToThermalCanvas(receipt) {
         root.setAttribute('data-bt-capture-id', captureId);
 
         var originalWidth = root.getBoundingClientRect().width;
-        var scale = originalWidth > 0 ? BLUETOOTH_THERMAL_WIDTH / originalWidth : 1;
+        var scale = originalWidth > 0 ? thermalWidth / originalWidth : 1;
         savedTransform = root.style.transform;
         savedTransformOrigin = root.style.transformOrigin;
 
@@ -1071,7 +1097,7 @@ async function renderReceiptToThermalCanvas(receipt) {
             useCORS: true,
             logging: false,
             imageTimeout: 0,
-            width: BLUETOOTH_THERMAL_WIDTH,
+            width: thermalWidth,
             windowWidth: Math.ceil(originalWidth),
             onclone: function(clonedDoc) {
                 var fixStyle = clonedDoc.createElement('style');
@@ -1090,7 +1116,7 @@ async function renderReceiptToThermalCanvas(receipt) {
         root.style.transformOrigin = savedTransformOrigin;
         root.removeAttribute('data-bt-capture-id');
         var croppedCanvas = cropCanvasToContent(canvas, 20);
-        return resizeCanvasToThermalWidth(croppedCanvas, BLUETOOTH_THERMAL_WIDTH);
+        return resizeCanvasToThermalWidth(croppedCanvas, thermalWidth);
     } finally {
         if (root) {
             if (root.removeAttribute) {
@@ -1123,90 +1149,153 @@ async function captureReceiptWifiThermalPayloads(receipt) {
     return { raster_png_base64: png, escpos_base64: escpos };
 }
 
-/**
- * Only show Bluetooth overlay when a Bluetooth print is in progress (guarded by __bluetoothPrintActive).
- * Set from printViaAndroidBridge; cleared after terminal state or after overlay hide delay.
- */
-function showBluetoothPrintDebug(info, payloadSent) {
-    if (!window.__bluetoothPrintActive) {
+// ─── Print debug overlay ───────────────────────────────────────────────────────
+
+var BT_PRINT_DEBUG_ID = 'pos_bluetooth_print_debug';
+
+function printDebugLog(msg) {
+    var el = document.getElementById(BT_PRINT_DEBUG_ID);
+    if (!el) return;
+    var logEl = el.querySelector('[data-log]');
+    if (!logEl) return;
+    var ts = new Date().toTimeString().slice(0, 8);
+    var line = document.createElement('div');
+    line.style.cssText = 'padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.04);';
+    line.innerHTML = '<span style="color:#64748b;margin-right:6px;">' + ts + '</span>' + msg;
+    logEl.appendChild(line);
+    logEl.scrollTop = logEl.scrollHeight;
+}
+
+function updatePrintStatus(text, color) {
+    var el = document.getElementById(BT_PRINT_DEBUG_ID);
+    if (!el) return;
+    var s = el.querySelector('[data-status]');
+    if (s) { s.textContent = text; s.style.color = color || '#e2e8f0'; }
+}
+
+function showPrintDebugPanel(printerType, printerName, printerAddress) {
+    var existing = document.getElementById(BT_PRINT_DEBUG_ID);
+    if (existing) {
+        existing.style.display = 'flex';
+        var logEl = existing.querySelector('[data-log]');
+        if (logEl) logEl.innerHTML = '';
+        var s = existing.querySelector('[data-status]');
+        if (s) { s.textContent = 'Sending...'; s.style.color = '#fbbf24'; }
+        var badge = existing.querySelector('[data-badge]');
+        if (badge) badge.textContent = printerType || 'BT';
+        var nameEl = existing.querySelector('[data-name]');
+        if (nameEl) nameEl.textContent = printerName || '';
+        var addrEl = existing.querySelector('[data-addr]');
+        if (addrEl) addrEl.textContent = printerAddress || '';
+        if (existing._hideTimer) { clearTimeout(existing._hideTimer); existing._hideTimer = null; }
+        printDebugLog('<span style="color:#facc15;">── print triggered ──</span>');
         return;
     }
-    var id = 'pos_bluetooth_print_debug';
-    var el = document.getElementById(id);
-    if (!el) {
-        el = document.createElement('div');
-        el.id = id;
-        el.style.cssText = 'position:fixed;bottom:12px;left:12px;max-width:400px;padding:10px 12px;' +
-            'background:rgba(0,0,0,0.88);color:#b8e986;font-family:monospace;font-size:12px;line-height:1.4;' +
-            'border-radius:6px;z-index:99999;box-shadow:0 2px 12px rgba(0,0,0,0.4);white-space:pre-wrap;word-break:break-all;pointer-events:none;';
-        document.body.appendChild(el);
-    }
-    var state = el._debugState || {
-        printer_name: '(not set)',
-        printer_address: '(not set)',
-        bridge_available: false,
-        status: '',
-        payload: null
-    };
-    if (info) {
-        if (info.printer_name != null) {
-            state.printer_name = info.printer_name;
-        }
-        if (info.printer_address != null) {
-            state.printer_address = info.printer_address;
-        }
-        if (info.bridge_available != null) {
-            state.bridge_available = !!info.bridge_available;
-        }
-        if (info.status != null) {
-            state.status = info.status;
-        }
-    }
-    if (payloadSent) {
-        state.payload = payloadSent;
-        if (payloadSent.bluetooth_printer_name) {
-            state.printer_name = payloadSent.bluetooth_printer_name;
-        }
-        if (payloadSent.bluetooth_printer_address) {
-            state.printer_address = payloadSent.bluetooth_printer_address;
-        }
-    }
-    el._debugState = state;
 
-    var lines = [
-        '[Bluetooth print]',
-        'Printer: ' + state.printer_name,
-        'MAC: ' + state.printer_address,
-        'Bridge: ' + (state.bridge_available ? 'OK' : 'MISSING'),
-        '---',
-        state.status || '(waiting)'
-    ];
-    if (state.payload) {
-        if (state.payload.command_count != null) {
-            lines.push('Sent to app: ' + state.payload.command_count + ' command(s)');
-        }
-        if (state.payload.request_id) {
-            lines.push('Request: ' + state.payload.request_id);
-        }
-        if (state.payload.server_commands != null) {
-            lines.push('Server /print/receipt: ' + state.payload.server_commands + ' command(s)');
-        }
-        if (state.payload.source) {
-            lines.push('Source: ' + state.payload.source);
-        }
+    var el = document.createElement('div');
+    el.id = BT_PRINT_DEBUG_ID;
+    el.style.cssText = [
+        'position:fixed', 'bottom:60px', 'right:12px',
+        'width:min(92vw,400px)', 'max-height:55vh',
+        'background:#111', 'color:#e2e8f0',
+        'font-family:monospace', 'font-size:12px', 'line-height:1.5',
+        'border-radius:10px', 'z-index:2147483646',
+        'box-shadow:0 8px 32px rgba(0,0,0,0.7)',
+        'display:flex', 'flex-direction:column',
+        'overflow:hidden', 'border:1px solid rgba(255,255,255,0.08)'
+    ].join(';');
+
+    var header = document.createElement('div');
+    header.style.cssText = 'display:flex;align-items:center;padding:10px 14px;background:#1e293b;flex-shrink:0;gap:8px;';
+
+    var title = document.createElement('span');
+    title.style.cssText = 'font-weight:bold;font-size:13px;color:#e2e8f0;flex:1;';
+    title.textContent = 'Print Debug';
+
+    var badge = document.createElement('span');
+    badge.setAttribute('data-badge', '');
+    badge.style.cssText = 'font-size:10px;padding:2px 7px;border-radius:4px;background:#0ea5e9;color:#fff;font-weight:bold;';
+    badge.textContent = printerType || 'BT';
+
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕';
+    closeBtn.style.cssText = 'background:none;border:none;color:#94a3b8;font-size:16px;cursor:pointer;padding:0 4px;line-height:1;';
+    closeBtn.onclick = function() { el.style.display = 'none'; window.__bluetoothPrintActive = false; };
+
+    header.appendChild(title);
+    header.appendChild(badge);
+    header.appendChild(closeBtn);
+
+    var statusBar = document.createElement('div');
+    statusBar.setAttribute('data-status', '');
+    statusBar.style.cssText = 'padding:5px 14px;font-size:11px;background:#0f172a;flex-shrink:0;color:#fbbf24;';
+    statusBar.textContent = 'Sending...';
+
+    var infoBar = document.createElement('div');
+    infoBar.style.cssText = 'padding:4px 14px;background:#0f172a;border-top:1px solid rgba(255,255,255,0.05);flex-shrink:0;display:flex;gap:12px;overflow:hidden;';
+
+    var nameEl = document.createElement('span');
+    nameEl.setAttribute('data-name', '');
+    nameEl.style.cssText = 'color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;';
+    nameEl.textContent = printerName || '';
+
+    var addrEl = document.createElement('span');
+    addrEl.setAttribute('data-addr', '');
+    addrEl.style.cssText = 'color:#64748b;white-space:nowrap;';
+    addrEl.textContent = printerAddress || '';
+
+    infoBar.appendChild(nameEl);
+    infoBar.appendChild(addrEl);
+
+    var logEl = document.createElement('div');
+    logEl.setAttribute('data-log', '');
+    logEl.style.cssText = 'flex:1;overflow-y:auto;padding:6px 14px 10px;min-height:60px;';
+
+    el.appendChild(header);
+    el.appendChild(statusBar);
+    el.appendChild(infoBar);
+    el.appendChild(logEl);
+    document.body.appendChild(el);
+
+    printDebugLog('<span style="color:#facc15;">── print triggered ──</span>');
+}
+
+function showBluetoothPrintDebug(info) {
+    // Called by window.__bluetoothPrintDebug throughout the print flow.
+    if (!window.__bluetoothPrintActive) return;
+    var el = document.getElementById(BT_PRINT_DEBUG_ID);
+    if (!el || el.style.display === 'none') return;
+    if (el._hideTimer) { clearTimeout(el._hideTimer); el._hideTimer = null; }
+
+    if (info && info.status) {
+        var s = info.status;
+        var isOk = /success|done|sent/i.test(s);
+        var isBad = /fail|error|denied|invalid/i.test(s);
+        var color = isOk ? '#86efac' : isBad ? '#f87171' : '#93c5fd';
+        printDebugLog('<span style="color:' + color + ';">' + s + '</span>');
+        if (isOk) updatePrintStatus('Done', '#86efac');
+        else if (isBad) updatePrintStatus(s, '#f87171');
+        else updatePrintStatus(s, '#fbbf24');
     }
-    el.innerHTML = lines.join('\n').replace(/\n/g, '<br>');
-    el.style.display = 'block';
-    if (el._hideTimer) {
-        clearTimeout(el._hideTimer);
+    if (info && info.payload) {
+        var p = info.payload;
+        if (p.command_count != null) printDebugLog('Commands: ' + p.command_count);
+        if (p.server_commands != null) printDebugLog('Server cmds: ' + p.server_commands);
+        if (p.source) printDebugLog('Source: ' + p.source);
     }
+
+    // Auto-hide 15s after the last update.
     el._hideTimer = setTimeout(function() {
         el.style.display = 'none';
         window.__bluetoothPrintActive = false;
-    }, 12000);
+    }, 15000);
 }
 
+window.__bluetoothPrintDebug = showBluetoothPrintDebug;
 window.showBluetoothPrintDebug = showBluetoothPrintDebug;
+window.showPrintDebugPanel = showPrintDebugPanel;
+window.printDebugLog = printDebugLog;
+window.updatePrintStatus = updatePrintStatus;
 
 // ─── Bluetooth scan debug overlay ─────────────────────────────────────────────
 
@@ -1383,6 +1472,10 @@ function printViaAndroidBridge(receipt) {
         window.__bluetoothPrintActive = true;
         var requestId = 'android-print-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
         var timeout = null;
+        // Open the panel immediately so all subsequent __bluetoothPrintDebug calls have somewhere to log.
+        var _btName = (receipt && receipt.bluetooth_printer_name) ? receipt.bluetooth_printer_name : (selectedBluetoothPrinter && selectedBluetoothPrinter.name) ? selectedBluetoothPrinter.name : '';
+        var _btAddr = (receipt && receipt.bluetooth_printer_address) ? receipt.bluetooth_printer_address : (selectedBluetoothPrinter && selectedBluetoothPrinter.address) ? selectedBluetoothPrinter.address : '';
+        showPrintDebugPanel('BT', _btName, _btAddr);
 
         function clearActiveLater() {
             setTimeout(function() {
@@ -2183,8 +2276,22 @@ function printViaSunmiAndroidBridge(receipt) {
             return;
         }
 
+        window.__bluetoothPrintActive = true;
+        showPrintDebugPanel('Sunmi', 'Inner Printer', 'internal');
+        var _sunmiModel = window.__sunmiPrinterModel || 'unknown';
+        printDebugLog('Printer model: <span style="color:#86efac;">' + _sunmiModel + '</span>');
+
         var requestId = 'android-sunmi-print-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
         var timeout = null;
+        var fetchAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+
+        function onJavaDebugLog(event) {
+            var d = event && event.detail ? event.detail : {};
+            if (d.requestId === requestId && d.log) {
+                printDebugLog('<span style="color:#93c5fd;">' + d.log + '</span>');
+            }
+        }
+        window.addEventListener('zat-sunmi-debug-log', onJavaDebugLog);
 
         function onBridgeResult(event) {
             var detail = event && event.detail ? event.detail : {};
@@ -2194,42 +2301,108 @@ function printViaSunmiAndroidBridge(receipt) {
             clearTimeout(timeout);
             window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
             if (detail.success === false) {
-                reject(new Error(detail.error || 'Sunmi inner print failed.'));
+                var errMsg = detail.error || 'Sunmi inner print failed.';
+                printDebugLog('<span style="color:#f87171;">Java: ' + errMsg + '</span>');
+                updatePrintStatus('Failed: ' + errMsg, '#f87171');
+                window.__bluetoothPrintActive = false;
+                window.removeEventListener('zat-sunmi-debug-log', onJavaDebugLog);
+                reject(new Error(errMsg));
             } else {
+                printDebugLog('<span style="color:#86efac;">Java: print succeeded</span>');
+                updatePrintStatus('Printed OK', '#86efac');
+                window.removeEventListener('zat-sunmi-debug-log', onJavaDebugLog);
+                setTimeout(function() { window.__bluetoothPrintActive = false; }, 3000);
                 resolve(detail);
             }
         }
 
-        function sendSunmiPayload(escposB64) {
+        // payload: { escpos_base64 } for server ESC/POS, { image_base64 } for PNG bitmap
+        function sendSunmiPayload(payload) {
+            var sizeKb = Math.round(((payload.image_base64 || payload.escpos_base64 || '').length * 0.75) / 1024);
+            var mode = payload.image_base64 ? 'PNG bitmap' : 'ESC/POS';
+            window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
             window.addEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+            clearTimeout(timeout);
+            printDebugLog('Sending ' + sizeKb + ' KB ' + mode + ' to Sunmi service...');
+            updatePrintStatus('Sending to Sunmi...', '#fbbf24');
             timeout = setTimeout(function() {
                 window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+                window.removeEventListener('zat-sunmi-debug-log', onJavaDebugLog);
+                printDebugLog('<span style="color:#fbbf24;">No response from Sunmi service after 6s — resolving anyway</span>');
+                updatePrintStatus('Timeout (no ack)', '#fbbf24');
+                window.__bluetoothPrintActive = false;
                 resolve({ requestId: requestId, status: 'sent' });
-            }, 12000);
-            window.ReactNativeWebView.postMessage(JSON.stringify({
-                type: 'sunmi_inner_print_receipt',
-                requestId: requestId,
-                escpos_base64: escposB64,
-            }));
+            }, 15000);
+            window.ReactNativeWebView.postMessage(JSON.stringify(
+                Object.assign({ type: 'sunmi_inner_print_receipt', requestId: requestId }, payload)
+            ));
         }
 
-        // Prefer server-provided escpos_base64; otherwise render client-side.
-        var inlineB64 = receipt && (receipt.escpos_base64 || receipt.escposBase64)
-            ? String(receipt.escpos_base64 || receipt.escposBase64).trim()
-            : '';
+        var sunmiThermalWidth = (receipt && receipt.thermal_width) ? parseInt(receipt.thermal_width) : SUNMI_THERMAL_WIDTH;
 
+        function renderAndSend() {
+            printDebugLog('Rendering receipt via html2canvas (' + sunmiThermalWidth + 'px)...');
+            updatePrintStatus('Rendering receipt...', '#fbbf24');
+            renderReceiptToThermalCanvas(receipt, sunmiThermalWidth).then(function(canvas) {
+                printDebugLog('Canvas: ' + canvas.width + 'x' + canvas.height + 'px — encoding PNG...');
+                // Send as PNG bitmap — Java uses printBitmap() which works on all Sunmi models.
+                // sendRAWData with GS v 0 raster does not print on many Sunmi firmware versions.
+                var pngB64 = canvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '');
+                printDebugLog('PNG encoded: ' + Math.round(pngB64.length * 0.75 / 1024) + ' KB');
+                sendSunmiPayload({ image_base64: pngB64 });
+            }).catch(function(err) {
+                var msg = err && err.message ? err.message : String(err);
+                console.error('Sunmi: receipt render failed', err);
+                printDebugLog('<span style="color:#f87171;">Render failed: ' + msg + '</span>');
+                updatePrintStatus('Render failed', '#f87171');
+                window.__bluetoothPrintActive = false;
+                reject(new Error('Sunmi receipt render failed: ' + msg));
+            });
+        }
+
+        // 1. Inline escpos_base64 from receipt object (highest priority)
+        var inlineB64 = receipt && (receipt.escpos_base64 || receipt.escposBase64)
+            ? String(receipt.escpos_base64 || receipt.escposBase64).trim() : '';
         if (inlineB64) {
-            sendSunmiPayload(inlineB64);
+            printDebugLog('Using inline escpos_base64 (' + Math.round(inlineB64.length * 0.75 / 1024) + ' KB)');
+            sendSunmiPayload({ escpos_base64: inlineB64 });
             return;
         }
 
-        renderReceiptToThermalCanvas(receipt).then(function(canvas) {
-            var escpos = uint8ToBase64EscPos(escPosGsV0RasterFromCanvas(canvas));
-            sendSunmiPayload(escpos);
-        }).catch(function(err) {
-            console.error('Sunmi: receipt render failed', err);
-            reject(new Error('Sunmi receipt render failed: ' + (err && err.message ? err.message : err)));
-        });
+        // 2. Fetch server-generated ESC/POS if we have a transaction_id
+        var transactionId = receipt && receipt.transaction_id;
+        if (transactionId && typeof fetch === 'function') {
+            printDebugLog('Fetching /print/receipt for transaction ' + transactionId + '...');
+            updatePrintStatus('Fetching from server...', '#fbbf24');
+            var printUrl = (typeof window.__printReceiptUrl === 'string' && window.__printReceiptUrl) ? window.__printReceiptUrl : '/print/receipt';
+            var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : (document.querySelector('input[name="_token"]') && document.querySelector('input[name="_token"]').value);
+            var headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+            if (csrfToken) headers['X-CSRF-TOKEN'] = csrfToken;
+            fetch(printUrl, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({ transaction_id: transactionId }),
+                credentials: 'same-origin',
+                signal: fetchAbortController ? fetchAbortController.signal : undefined
+            }).then(function(res) { return res.json(); }).then(function(data) {
+                if (data.success && data.escpos_base64) {
+                    printDebugLog('Server returned escpos_base64 (' + Math.round(data.escpos_base64.length * 0.75 / 1024) + ' KB)');
+                    sendSunmiPayload({ escpos_base64: data.escpos_base64 });
+                } else {
+                    printDebugLog('Server has no escpos_base64 — falling back to render');
+                    renderAndSend();
+                }
+            }).catch(function(err) {
+                if (err && err.name === 'AbortError') return;
+                printDebugLog('Fetch failed (' + (err && err.message ? err.message : err) + ') — falling back to render');
+                renderAndSend();
+            });
+            return;
+        }
+
+        // 3. No transaction_id — render directly
+        renderAndSend();
     });
 }
 
