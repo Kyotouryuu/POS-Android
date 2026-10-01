@@ -121,7 +121,7 @@ function normalizeUsbPrinterDevices(devices) {
         });
 }
 
-function setAvailableBluetoothPrinters(devices, requestId = null, meta = null) {
+function _setAvailableBluetoothPrintersImpl(devices, requestId = null, meta = null) {
     var raw = Array.isArray(devices) ? devices : [];
     androidBluetoothPrintersCache = normalizeBluetoothPrinterDevices(raw);
     console.log('Normalized bluetooth printers cache:', androidBluetoothPrintersCache);
@@ -145,7 +145,7 @@ function setAvailableBluetoothPrinters(devices, requestId = null, meta = null) {
     return androidBluetoothPrintersCache.slice();
 }
 
-function setAvailableUsbPrinters(devices, requestId = null) {
+function _setAvailableUsbPrintersImpl(devices, requestId = null) {
     androidUsbPrintersCache = normalizeUsbPrinterDevices(devices);
     console.log('Normalized USB printers cache:', androidUsbPrintersCache);
 
@@ -243,11 +243,11 @@ function handleBluetoothPrintersMessageEvent(event) {
 
 window.printerTray.setAvailableBluetoothPrinters = function(devices, requestId, meta) {
     console.log('Received bluetooth printers:', devices);
-    return setAvailableBluetoothPrinters(devices, requestId, meta);
+    return _setAvailableBluetoothPrintersImpl(devices, requestId, meta);
 };
 window.printerTray.setAvailableUsbPrinters = function(devices, requestId) {
     console.log('Received USB printers:', devices);
-    return setAvailableUsbPrinters(devices, requestId);
+    return _setAvailableUsbPrintersImpl(devices, requestId);
 };
 
 /**
@@ -315,30 +315,7 @@ window.__onAndroidBluetoothDevices = function(detail) {
     }, 0);
 };
 
-function handleBtScanAckEvent(event) {
-    var detail = event && event.detail;
-    if (!detail) return;
-    var el = document.getElementById(BT_SCAN_DEBUG_ID);
-    if (!el) return;
-
-    var status = el.querySelector('[data-status]');
-    var perm = detail.permission_granted;
-    var canReq = detail.can_request_permission;
-    var sdk = detail.sdk_int;
-
-    btScanDebugLog('Java ack — SDK: <span style="color:#93c5fd;">' + sdk + '</span>' +
-        ' | permission: <span style="color:' + (perm ? '#86efac' : '#f87171') + '">' + (perm ? 'granted' : 'DENIED') + '</span>' +
-        (perm ? '' : ' | can request: <span style="color:' + (canReq ? '#fbbf24' : '#f87171') + '">' + (canReq ? 'yes' : 'NO — go to Settings') + '</span>'));
-
-    if (!perm && !canReq && status) {
-        status.textContent = '✕ Permission permanently denied — open Android Settings > Apps > ZatPOS > Permissions > Nearby Devices';
-        status.style.color = '#f87171';
-        status.style.whiteSpace = 'normal';
-    } else if (!perm && canReq && status) {
-        status.textContent = '⏳ Permission dialog opened — tap Allow';
-        status.style.color = '#fbbf24';
-    }
-}
+function handleBtScanAckEvent() {}
 window.addEventListener('zat-android-bt-scan-ack', handleBtScanAckEvent);
 document.addEventListener('zat-android-bt-scan-ack', handleBtScanAckEvent);
 
@@ -446,7 +423,6 @@ function getAvailableUsbPrinters() {
  */
 function requestBluetoothScan() {
     console.log('Bridge available:', isAndroidBridgeAvailable());
-    showBluetoothScanDebug();
     if (!isAndroidBridgeAvailable()) {
         console.warn('Android bridge not available');
         btScanDebugLog('<span style="color:#f87171;">Bridge not available — ReactNativeWebView missing</span>');
@@ -709,16 +685,23 @@ function getPrintableRoot(scope) {
     return candidates.length ? candidates[0] : null;
 }
 
-function createTemporaryPrintableHost(htmlContent) {
+function createTemporaryPrintableHost(htmlContent, targetWidthPx) {
+    // targetWidthPx lets the caller lay out at the actual thermal width (e.g. 384 for
+    // 58mm, 576 for 80mm) instead of the default 320px workspace. When our own compact
+    // template is used, laying out at native thermal width avoids browser wrapping the
+    // Arabic text one-char-per-line and then html2canvas scaling it up fuzzily.
+    var workspaceWidth = (typeof targetWidthPx === 'number' && targetWidthPx >= 200)
+        ? Math.floor(targetWidthPx)
+        : BLUETOOTH_CAPTURE_WORKSPACE_WIDTH;
     var host = document.createElement('div');
     host.setAttribute('data-receipt-capture-host', 'true');
     host.style.cssText = [
         'position:fixed',
         'left:-10000px',
         'top:0',
-        'width:' + BLUETOOTH_CAPTURE_WORKSPACE_WIDTH + 'px',
-        'min-width:' + BLUETOOTH_CAPTURE_WORKSPACE_WIDTH + 'px',
-        'max-width:' + BLUETOOTH_CAPTURE_WORKSPACE_WIDTH + 'px',
+        'width:' + workspaceWidth + 'px',
+        'min-width:' + workspaceWidth + 'px',
+        'max-width:' + workspaceWidth + 'px',
         'background:#fff',
         'color:#000',
         'display:block',
@@ -743,9 +726,9 @@ function createTemporaryPrintableHost(htmlContent) {
         'display:block',
         'visibility:visible',
         'opacity:1',
-        'width:' + BLUETOOTH_CAPTURE_WORKSPACE_WIDTH + 'px',
-        'min-width:' + BLUETOOTH_CAPTURE_WORKSPACE_WIDTH + 'px',
-        'max-width:' + BLUETOOTH_CAPTURE_WORKSPACE_WIDTH + 'px',
+        'width:' + workspaceWidth + 'px',
+        'min-width:' + workspaceWidth + 'px',
+        'max-width:' + workspaceWidth + 'px',
         'margin:0 auto',
         'padding:0',
         'box-sizing:border-box',
@@ -1058,7 +1041,9 @@ async function renderReceiptToThermalCanvas(receipt, thermalWidth) {
     var savedTransformOrigin;
 
     if (receipt && receipt.html_content) {
-        var tempRender = createTemporaryPrintableHost(receipt.html_content);
+        // Lay out at the actual thermal width so the compact template renders natively
+        // (no shrinking of text below readable) and no fuzzy upscale by html2canvas.
+        var tempRender = createTemporaryPrintableHost(receipt.html_content, thermalWidth);
         cleanup = tempRender.cleanup;
         root = tempRender.root;
     } else {
@@ -1101,7 +1086,40 @@ async function renderReceiptToThermalCanvas(receipt, thermalWidth) {
             windowWidth: Math.ceil(originalWidth),
             onclone: function(clonedDoc) {
                 var fixStyle = clonedDoc.createElement('style');
-                fixStyle.textContent = 'hr{border:none!important;border-top:2px solid #000!important;height:0!important;margin:8px 0!important;display:block!important;visibility:visible!important;opacity:1!important}table,th,td{border-color:#000!important}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}';
+                var is58mm = thermalWidth <= 400;
+                // Shared thermal legibility overrides: pure black on white, larger
+                // minimum font, heavier weight to compensate for faint thermal head burn.
+                var rules = [
+                    'hr{border:none!important;border-top:2px solid #000!important;height:0!important;margin:8px 0!important;display:block!important;visibility:visible!important;opacity:1!important}',
+                    'table,th,td{border-color:#000!important}',
+                    'body,p,div,span,td,th,li,strong,em{color:#000!important;font-weight:600!important;-webkit-text-stroke:0.15px #000!important}',
+                    'h1,h2,h3,h4,strong,b{font-weight:800!important;-webkit-text-stroke:0.4px #000!important}',
+                    'img{filter:contrast(1.6) brightness(0.85)!important;max-width:100%!important;height:auto!important}',
+                    '*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color:#000!important}'
+                ];
+                if (is58mm) {
+                    // 58mm (~384px @ 203dpi, ~32 chars/line). Conventions:
+                    //   - No side-by-side tabular columns beyond 2 — stack numeric rows vertically
+                    //   - Tighter padding (paper is narrow, wasted margins hurt)
+                    //   - QR max ~130px so it fits with breathing room
+                    //   - Slightly smaller base font than 80mm since content must reflow narrower
+                    rules.push('body{font-size:13px!important;line-height:1.35!important;padding:2px!important;margin:0!important}');
+                    rules.push('th,td{padding:2px 3px!important;font-size:13px!important;line-height:1.3!important;word-break:break-word!important;white-space:normal!important}');
+                    rules.push('small,.f-8{font-size:10px!important}');
+                    // Force item tables to single-column stack: any table with >2 cols in the row
+                    // typically means qty/price/total — hide separator cells and rely on slim2's
+                    // built-in flex numeric row.
+                    rules.push('svg{max-width:130px!important;height:auto!important;display:block!important;margin:6px auto!important}');
+                    rules.push('.slim2-numeric-row{gap:6px!important;font-size:12px!important}');
+                    rules.push('.slim-line-items-header,.slim-line-items-table th{font-size:11px!important;padding:2px!important}');
+                } else {
+                    // 80mm (~576px @ 203dpi, ~48 chars/line): more breathing room, larger baseline.
+                    rules.push('body{font-size:14px!important;line-height:1.4!important}');
+                    rules.push('th,td{padding:4px 5px!important;font-size:14px!important;line-height:1.35!important}');
+                    rules.push('small{font-size:12px!important}');
+                    rules.push('svg{max-width:180px!important;height:auto!important}');
+                }
+                fixStyle.textContent = rules.join('');
                 clonedDoc.head.appendChild(fixStyle);
                 var clonedRoot = clonedDoc.querySelector('[data-bt-capture-id="' + captureId + '"]');
                 if (clonedRoot) {
@@ -1149,147 +1167,10 @@ async function captureReceiptWifiThermalPayloads(receipt) {
     return { raster_png_base64: png, escpos_base64: escpos };
 }
 
-// ─── Print debug overlay ───────────────────────────────────────────────────────
-
-var BT_PRINT_DEBUG_ID = 'pos_bluetooth_print_debug';
-
-function printDebugLog(msg) {
-    var el = document.getElementById(BT_PRINT_DEBUG_ID);
-    if (!el) return;
-    var logEl = el.querySelector('[data-log]');
-    if (!logEl) return;
-    var ts = new Date().toTimeString().slice(0, 8);
-    var line = document.createElement('div');
-    line.style.cssText = 'padding:2px 0;border-bottom:1px solid rgba(255,255,255,0.04);';
-    line.innerHTML = '<span style="color:#64748b;margin-right:6px;">' + ts + '</span>' + msg;
-    logEl.appendChild(line);
-    logEl.scrollTop = logEl.scrollHeight;
-}
-
-function updatePrintStatus(text, color) {
-    var el = document.getElementById(BT_PRINT_DEBUG_ID);
-    if (!el) return;
-    var s = el.querySelector('[data-status]');
-    if (s) { s.textContent = text; s.style.color = color || '#e2e8f0'; }
-}
-
-function showPrintDebugPanel(printerType, printerName, printerAddress) {
-    var existing = document.getElementById(BT_PRINT_DEBUG_ID);
-    if (existing) {
-        existing.style.display = 'flex';
-        var logEl = existing.querySelector('[data-log]');
-        if (logEl) logEl.innerHTML = '';
-        var s = existing.querySelector('[data-status]');
-        if (s) { s.textContent = 'Sending...'; s.style.color = '#fbbf24'; }
-        var badge = existing.querySelector('[data-badge]');
-        if (badge) badge.textContent = printerType || 'BT';
-        var nameEl = existing.querySelector('[data-name]');
-        if (nameEl) nameEl.textContent = printerName || '';
-        var addrEl = existing.querySelector('[data-addr]');
-        if (addrEl) addrEl.textContent = printerAddress || '';
-        if (existing._hideTimer) { clearTimeout(existing._hideTimer); existing._hideTimer = null; }
-        printDebugLog('<span style="color:#facc15;">── print triggered ──</span>');
-        return;
-    }
-
-    var el = document.createElement('div');
-    el.id = BT_PRINT_DEBUG_ID;
-    el.style.cssText = [
-        'position:fixed', 'bottom:60px', 'right:12px',
-        'width:min(92vw,400px)', 'max-height:55vh',
-        'background:#111', 'color:#e2e8f0',
-        'font-family:monospace', 'font-size:12px', 'line-height:1.5',
-        'border-radius:10px', 'z-index:2147483646',
-        'box-shadow:0 8px 32px rgba(0,0,0,0.7)',
-        'display:flex', 'flex-direction:column',
-        'overflow:hidden', 'border:1px solid rgba(255,255,255,0.08)'
-    ].join(';');
-
-    var header = document.createElement('div');
-    header.style.cssText = 'display:flex;align-items:center;padding:10px 14px;background:#1e293b;flex-shrink:0;gap:8px;';
-
-    var title = document.createElement('span');
-    title.style.cssText = 'font-weight:bold;font-size:13px;color:#e2e8f0;flex:1;';
-    title.textContent = 'Print Debug';
-
-    var badge = document.createElement('span');
-    badge.setAttribute('data-badge', '');
-    badge.style.cssText = 'font-size:10px;padding:2px 7px;border-radius:4px;background:#0ea5e9;color:#fff;font-weight:bold;';
-    badge.textContent = printerType || 'BT';
-
-    var closeBtn = document.createElement('button');
-    closeBtn.textContent = '✕';
-    closeBtn.style.cssText = 'background:none;border:none;color:#94a3b8;font-size:16px;cursor:pointer;padding:0 4px;line-height:1;';
-    closeBtn.onclick = function() { el.style.display = 'none'; window.__bluetoothPrintActive = false; };
-
-    header.appendChild(title);
-    header.appendChild(badge);
-    header.appendChild(closeBtn);
-
-    var statusBar = document.createElement('div');
-    statusBar.setAttribute('data-status', '');
-    statusBar.style.cssText = 'padding:5px 14px;font-size:11px;background:#0f172a;flex-shrink:0;color:#fbbf24;';
-    statusBar.textContent = 'Sending...';
-
-    var infoBar = document.createElement('div');
-    infoBar.style.cssText = 'padding:4px 14px;background:#0f172a;border-top:1px solid rgba(255,255,255,0.05);flex-shrink:0;display:flex;gap:12px;overflow:hidden;';
-
-    var nameEl = document.createElement('span');
-    nameEl.setAttribute('data-name', '');
-    nameEl.style.cssText = 'color:#e2e8f0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1;';
-    nameEl.textContent = printerName || '';
-
-    var addrEl = document.createElement('span');
-    addrEl.setAttribute('data-addr', '');
-    addrEl.style.cssText = 'color:#64748b;white-space:nowrap;';
-    addrEl.textContent = printerAddress || '';
-
-    infoBar.appendChild(nameEl);
-    infoBar.appendChild(addrEl);
-
-    var logEl = document.createElement('div');
-    logEl.setAttribute('data-log', '');
-    logEl.style.cssText = 'flex:1;overflow-y:auto;padding:6px 14px 10px;min-height:60px;';
-
-    el.appendChild(header);
-    el.appendChild(statusBar);
-    el.appendChild(infoBar);
-    el.appendChild(logEl);
-    document.body.appendChild(el);
-
-    printDebugLog('<span style="color:#facc15;">── print triggered ──</span>');
-}
-
-function showBluetoothPrintDebug(info) {
-    // Called by window.__bluetoothPrintDebug throughout the print flow.
-    if (!window.__bluetoothPrintActive) return;
-    var el = document.getElementById(BT_PRINT_DEBUG_ID);
-    if (!el || el.style.display === 'none') return;
-    if (el._hideTimer) { clearTimeout(el._hideTimer); el._hideTimer = null; }
-
-    if (info && info.status) {
-        var s = info.status;
-        var isOk = /success|done|sent/i.test(s);
-        var isBad = /fail|error|denied|invalid/i.test(s);
-        var color = isOk ? '#86efac' : isBad ? '#f87171' : '#93c5fd';
-        printDebugLog('<span style="color:' + color + ';">' + s + '</span>');
-        if (isOk) updatePrintStatus('Done', '#86efac');
-        else if (isBad) updatePrintStatus(s, '#f87171');
-        else updatePrintStatus(s, '#fbbf24');
-    }
-    if (info && info.payload) {
-        var p = info.payload;
-        if (p.command_count != null) printDebugLog('Commands: ' + p.command_count);
-        if (p.server_commands != null) printDebugLog('Server cmds: ' + p.server_commands);
-        if (p.source) printDebugLog('Source: ' + p.source);
-    }
-
-    // Auto-hide 15s after the last update.
-    el._hideTimer = setTimeout(function() {
-        el.style.display = 'none';
-        window.__bluetoothPrintActive = false;
-    }, 15000);
-}
+function printDebugLog() {}
+function updatePrintStatus() {}
+function showPrintDebugPanel() {}
+function showBluetoothPrintDebug() {}
 
 window.__bluetoothPrintDebug = showBluetoothPrintDebug;
 window.showBluetoothPrintDebug = showBluetoothPrintDebug;
@@ -1297,168 +1178,13 @@ window.showPrintDebugPanel = showPrintDebugPanel;
 window.printDebugLog = printDebugLog;
 window.updatePrintStatus = updatePrintStatus;
 
-// ─── Bluetooth scan debug overlay ─────────────────────────────────────────────
-
-var BT_SCAN_DEBUG_ID = 'pos_bluetooth_scan_debug';
-
-function btScanDebugLog(msg) {
-    var el = document.getElementById(BT_SCAN_DEBUG_ID);
-    if (!el) return;
-    var ts = new Date().toTimeString().slice(0, 8);
-    var logEl = el.querySelector('[data-log]');
-    if (!logEl) return;
-    var line = document.createElement('div');
-    line.style.cssText = 'border-top:1px solid rgba(255,255,255,0.08);padding:4px 0;word-break:break-all;';
-    line.innerHTML = '<span style="color:#888;margin-right:6px;">' + ts + '</span>' + msg;
-    logEl.appendChild(line);
-    logEl.scrollTop = logEl.scrollHeight;
-}
-
-function showBluetoothScanDebug() {
-    var existing = document.getElementById(BT_SCAN_DEBUG_ID);
-    if (existing) {
-        existing.style.display = 'flex';
-        btScanDebugLog('<span style="color:#facc15;">── scan triggered ──</span>');
-        return;
-    }
-
-    var el = document.createElement('div');
-    el.id = BT_SCAN_DEBUG_ID;
-    el.style.cssText = [
-        'position:fixed', 'top:40px', 'left:50%', 'transform:translateX(-50%)',
-        'width:min(92vw,540px)', 'max-height:70vh',
-        'background:#111', 'color:#e2e8f0',
-        'font-family:monospace', 'font-size:13px', 'line-height:1.5',
-        'border-radius:10px', 'z-index:99999',
-        'box-shadow:0 8px 32px rgba(0,0,0,0.7)',
-        'display:flex', 'flex-direction:column',
-        'border:1px solid rgba(255,255,255,0.12)',
-        'overflow:hidden'
-    ].join(';');
-
-    // Header
-    var header = document.createElement('div');
-    header.style.cssText = 'display:flex;align-items:center;justify-content:space-between;padding:10px 14px;background:#1e293b;border-bottom:1px solid rgba(255,255,255,0.1);flex-shrink:0;';
-    var title = document.createElement('span');
-    title.style.cssText = 'font-size:14px;font-weight:bold;color:#93c5fd;letter-spacing:0.5px;';
-    title.textContent = '🔵 Bluetooth Scan Debug';
-
-    var bridge = isAndroidBridgeAvailable();
-    var badge = document.createElement('span');
-    badge.setAttribute('data-bridge-badge', '');
-    badge.style.cssText = 'font-size:11px;padding:2px 8px;border-radius:12px;margin-left:8px;' +
-        (bridge ? 'background:#166534;color:#86efac;' : 'background:#7f1d1d;color:#fca5a5;');
-    badge.textContent = bridge ? 'Bridge OK' : 'Bridge MISSING';
-
-    var closeBtn = document.createElement('button');
-    closeBtn.textContent = '✕';
-    closeBtn.style.cssText = 'background:none;border:none;color:#94a3b8;font-size:16px;cursor:pointer;padding:0 4px;margin-left:auto;';
-    closeBtn.onclick = function() { el.style.display = 'none'; };
-
-    header.appendChild(title);
-    header.appendChild(badge);
-    header.appendChild(closeBtn);
-
-    // Status bar
-    var statusBar = document.createElement('div');
-    statusBar.setAttribute('data-status', '');
-    statusBar.style.cssText = 'padding:6px 14px;font-size:12px;color:#fbbf24;background:#1c1917;border-bottom:1px solid rgba(255,255,255,0.07);flex-shrink:0;';
-    statusBar.textContent = 'Waiting for scan result…';
-
-    // Log pane
-    var logEl = document.createElement('div');
-    logEl.setAttribute('data-log', '');
-    logEl.style.cssText = 'flex:1;overflow-y:auto;padding:8px 14px 12px;';
-
-    // Device list pane
-    var devLabel = document.createElement('div');
-    devLabel.style.cssText = 'padding:6px 14px 2px;font-size:11px;color:#64748b;text-transform:uppercase;letter-spacing:0.5px;flex-shrink:0;border-top:1px solid rgba(255,255,255,0.07);';
-    devLabel.textContent = 'Paired devices';
-
-    var devList = document.createElement('div');
-    devList.setAttribute('data-devices', '');
-    devList.style.cssText = 'padding:4px 14px 12px;max-height:180px;overflow-y:auto;flex-shrink:0;';
-    devList.innerHTML = '<span style="color:#475569;font-size:12px;">none yet</span>';
-
-    el.appendChild(header);
-    el.appendChild(statusBar);
-    el.appendChild(logEl);
-    el.appendChild(devLabel);
-    el.appendChild(devList);
-    document.body.appendChild(el);
-
-    btScanDebugLog('<span style="color:#facc15;">── scan triggered ──</span>');
-    btScanDebugLog('Bridge: <span style="color:' + (bridge ? '#86efac' : '#fca5a5') + '">' + (bridge ? 'available' : 'NOT available') + '</span>');
-}
-
-function updateBluetoothScanDebug(rawDevices, normalizedDevices, meta) {
-    var el = document.getElementById(BT_SCAN_DEBUG_ID);
-    if (!el) return;
-
-    var status = el.querySelector('[data-status]');
-    var devList = el.querySelector('[data-devices]');
-
-    // Update the status bar with permission/BT info if available
-    meta = meta || {};
-    var count = Array.isArray(normalizedDevices) ? normalizedDevices.length : 0;
-    var statusText, statusColor;
-    if (meta.permission_granted === false) {
-        statusText = '✕ Permission denied — tap Scan again to re-request';
-        statusColor = '#f87171';
-    } else if (meta.bluetooth_enabled === false) {
-        statusText = '✕ Bluetooth is off — enable it in Android Settings';
-        statusColor = '#f87171';
-    } else if (count === 0) {
-        statusText = '⚠ No paired devices — pair your printer in Android Bluetooth Settings first';
-        statusColor = '#fbbf24';
-    } else {
-        statusText = '✓ Found ' + count + ' paired device' + (count === 1 ? '' : 's');
-        statusColor = '#86efac';
-    }
-    if (status) {
-        status.textContent = statusText;
-        status.style.color = statusColor;
-    }
-
-    if (meta) {
-        if (meta.permission_granted === false) {
-            btScanDebugLog('<span style="color:#f87171;">BLUETOOTH_CONNECT: DENIED</span>');
-        } else if (meta.permission_granted === true) {
-            btScanDebugLog('<span style="color:#86efac;">BLUETOOTH_CONNECT: granted</span>');
-        }
-        if (meta.bluetooth_enabled === false) {
-            btScanDebugLog('<span style="color:#f87171;">Bluetooth adapter: OFF</span>');
-        } else if (meta.bluetooth_enabled === true) {
-            btScanDebugLog('<span style="color:#86efac;">Bluetooth adapter: on</span>');
-        }
-    }
-    btScanDebugLog('Raw devices received: <span style="color:#93c5fd;">' + JSON.stringify(rawDevices) + '</span>');
-
-    if (count === 0) {
-        if (devList) devList.innerHTML = '<span style="color:#f87171;font-size:12px;">No devices returned — BT off, not paired, or permission denied</span>';
-        return;
-    }
-
-    if (devList) {
-        devList.innerHTML = '';
-        normalizedDevices.forEach(function(d, i) {
-            var row = document.createElement('div');
-            row.style.cssText = 'padding:5px 0;border-bottom:1px solid rgba(255,255,255,0.06);font-size:12px;';
-            row.innerHTML =
-                '<span style="color:#fbbf24;margin-right:6px;">' + (i + 1) + '.</span>' +
-                '<span style="color:#e2e8f0;">' + (d.name || '(no name)') + '</span>' +
-                '<span style="color:#64748b;margin-left:8px;">' + (d.address || '?') + '</span>';
-            devList.appendChild(row);
-        });
-    }
-
-    btScanDebugLog('Normalized: ' + count + ' device(s) → <span style="color:#86efac;">' +
-        normalizedDevices.map(function(d) { return (d.name || '?') + ' [' + d.address + ']'; }).join(', ') +
-        '</span>');
-}
+function btScanDebugLog() {}
+function showBluetoothScanDebug() {}
+function updateBluetoothScanDebug() {}
 
 window.showBluetoothScanDebug = showBluetoothScanDebug;
 window.updateBluetoothScanDebug = updateBluetoothScanDebug;
+
 
 // Send receipt payload to Android app (ReactNative WebView bridge) for bluetooth printing.
 // Prefers print-ready image from POST /print/receipt when receipt.transaction_id is present.
@@ -1472,10 +1198,6 @@ function printViaAndroidBridge(receipt) {
         window.__bluetoothPrintActive = true;
         var requestId = 'android-print-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
         var timeout = null;
-        // Open the panel immediately so all subsequent __bluetoothPrintDebug calls have somewhere to log.
-        var _btName = (receipt && receipt.bluetooth_printer_name) ? receipt.bluetooth_printer_name : (selectedBluetoothPrinter && selectedBluetoothPrinter.name) ? selectedBluetoothPrinter.name : '';
-        var _btAddr = (receipt && receipt.bluetooth_printer_address) ? receipt.bluetooth_printer_address : (selectedBluetoothPrinter && selectedBluetoothPrinter.address) ? selectedBluetoothPrinter.address : '';
-        showPrintDebugPanel('BT', _btName, _btAddr);
 
         function clearActiveLater() {
             setTimeout(function() {
@@ -1577,6 +1299,40 @@ function printViaAndroidBridge(receipt) {
             return;
         }
 
+        // If caller explicitly said to use local HTML (mobile compact template), render
+        // client-side and skip /print/receipt — the server returns the A4 layout which
+        // renders as bordered tables and side-by-side QR on thermal paper.
+        if (receipt && receipt.use_local_html && htmlContent) {
+            if (typeof window.__bluetoothPrintDebug === 'function') {
+                try {
+                    window.__bluetoothPrintDebug({
+                        printer_name: name,
+                        printer_address: address,
+                        bridge_available: isAndroidBridgeAvailable(),
+                        status: 'use_local_html — rendering compact template client-side, skipping /print/receipt'
+                    });
+                } catch (e) {}
+            }
+            captureReceiptWifiThermalPayloads({ html_content: htmlContent }).then(function(payloads) {
+                var fallback = {
+                    type: 'bluetooth_print_receipt',
+                    requestId: requestId,
+                    address: address,
+                    name: name,
+                    bluetooth_printer_mac: address,
+                    bluetooth_printer_name: name,
+                    escpos_base64: payloads.escpos_base64,
+                    thermal_width: BLUETOOTH_THERMAL_WIDTH
+                };
+                var kb = Math.round((payloads.escpos_base64.length * 0.75) / 1024);
+                sendPayload(fallback, { status: 'Sent ESC/POS raster (' + kb + ' KB) to app', source: 'local-html' });
+            }).catch(function(renderErr) {
+                window.__bluetoothPrintActive = false;
+                reject(renderErr instanceof Error ? renderErr : new Error(String(renderErr)));
+            });
+            return;
+        }
+
         var transactionId = receipt && receipt.transaction_id;
         if (transactionId && typeof fetch === 'function') {
             if (typeof window.__bluetoothPrintDebug === 'function') {
@@ -1635,10 +1391,44 @@ function printViaAndroidBridge(receipt) {
                                 printer_name: name,
                                 printer_address: address,
                                 bridge_available: isAndroidBridgeAvailable(),
-                                status: 'Server returned no commands (success=' + !!data.success + '). Using HTML fallback.'
+                                status: 'Server returned no commands (success=' + !!data.success + '). Rendering HTML → ESC/POS raster client-side...'
                             });
                         } catch (e) {}
                     }
+                    var fallbackHtml = htmlContent || (data && data.html_content) || '';
+                    captureReceiptWifiThermalPayloads({ html_content: fallbackHtml }).then(function(payloads) {
+                        var fallback = {
+                            type: 'bluetooth_print_receipt',
+                            requestId: requestId,
+                            address: address,
+                            name: name,
+                            bluetooth_printer_mac: address,
+                            bluetooth_printer_name: name,
+                            escpos_base64: payloads.escpos_base64,
+                            thermal_width: BLUETOOTH_THERMAL_WIDTH
+                        };
+                        var kb = Math.round((payloads.escpos_base64.length * 0.75) / 1024);
+                        sendPayload(fallback, { status: 'Sent ESC/POS raster (' + kb + ' KB) to app', source: '/print/receipt-render' });
+                    }).catch(function(renderErr) {
+                        window.__bluetoothPrintActive = false;
+                        reject(renderErr instanceof Error ? renderErr : new Error(String(renderErr)));
+                    });
+                }
+            }).catch(function(err) {
+                // AbortError = timeout already resolved and cancelled us; stay silent.
+                if (err && err.name === 'AbortError') return;
+                console.warn('Bluetooth: /print/receipt failed, rendering HTML fallback client-side', err);
+                if (typeof window.__bluetoothPrintDebug === 'function') {
+                    try {
+                        window.__bluetoothPrintDebug({
+                            printer_name: name,
+                            printer_address: address,
+                            bridge_available: isAndroidBridgeAvailable(),
+                            status: 'Fetch failed: ' + (err && err.message ? err.message : err) + '. Rendering HTML → ESC/POS raster client-side...'
+                        });
+                    } catch (e2) {}
+                }
+                captureReceiptWifiThermalPayloads({ html_content: htmlContent }).then(function(payloads) {
                     var fallback = {
                         type: 'bluetooth_print_receipt',
                         requestId: requestId,
@@ -1646,34 +1436,15 @@ function printViaAndroidBridge(receipt) {
                         name: name,
                         bluetooth_printer_mac: address,
                         bluetooth_printer_name: name,
-                        html_content: htmlContent || (data && data.html_content) || '',
+                        escpos_base64: payloads.escpos_base64,
                         thermal_width: BLUETOOTH_THERMAL_WIDTH
                     };
-                    sendPayload(fallback, { status: 'HTML fallback sent to app', source: '/print/receipt' });
-                }
-            }).catch(function(err) {
-                console.warn('Bluetooth: /print/receipt failed, sending HTML fallback', err);
-                if (typeof window.__bluetoothPrintDebug === 'function') {
-                    try {
-                        window.__bluetoothPrintDebug({
-                            printer_name: name,
-                            printer_address: address,
-                            bridge_available: isAndroidBridgeAvailable(),
-                            status: 'Fetch failed: ' + (err && err.message ? err.message : err) + '. Using HTML fallback.'
-                        });
-                    } catch (e2) {}
-                }
-                var fallback = {
-                    type: 'bluetooth_print_receipt',
-                    requestId: requestId,
-                    address: address,
-                    name: name,
-                    bluetooth_printer_mac: address,
-                    bluetooth_printer_name: name,
-                    html_content: htmlContent,
-                    thermal_width: BLUETOOTH_THERMAL_WIDTH
-                };
-                sendPayload(fallback, { status: 'HTML fallback sent to app' });
+                    var kb = Math.round((payloads.escpos_base64.length * 0.75) / 1024);
+                    sendPayload(fallback, { status: 'Sent ESC/POS raster (' + kb + ' KB) to app', source: 'inline-render' });
+                }).catch(function(renderErr) {
+                    window.__bluetoothPrintActive = false;
+                    reject(renderErr instanceof Error ? renderErr : new Error(String(renderErr)));
+                });
             });
             return;
         }
@@ -1684,21 +1455,37 @@ function printViaAndroidBridge(receipt) {
                     printer_name: name,
                     printer_address: address,
                     bridge_available: isAndroidBridgeAvailable(),
-                    status: 'No transaction_id; sending HTML content to app.'
+                    status: 'No transaction_id; rendering HTML → ESC/POS raster client-side...'
                 });
             } catch (e) {}
         }
-        var payload = {
-            type: 'bluetooth_print_receipt',
-            requestId: requestId,
-            address: address,
-            name: name,
-            bluetooth_printer_mac: address,
-            bluetooth_printer_name: name,
-            html_content: htmlContent,
-            thermal_width: BLUETOOTH_THERMAL_WIDTH
-        };
-        sendPayload(payload, { status: 'HTML payload sent to app', source: 'inline' });
+        captureReceiptWifiThermalPayloads({ html_content: htmlContent }).then(function(payloads) {
+            var payload = {
+                type: 'bluetooth_print_receipt',
+                requestId: requestId,
+                address: address,
+                name: name,
+                bluetooth_printer_mac: address,
+                bluetooth_printer_name: name,
+                escpos_base64: payloads.escpos_base64,
+                thermal_width: BLUETOOTH_THERMAL_WIDTH
+            };
+            var kb = Math.round((payloads.escpos_base64.length * 0.75) / 1024);
+            sendPayload(payload, { status: 'Sent ESC/POS raster (' + kb + ' KB) to app', source: 'inline-render' });
+        }).catch(function(renderErr) {
+            window.__bluetoothPrintActive = false;
+            if (typeof window.__bluetoothPrintDebug === 'function') {
+                try {
+                    window.__bluetoothPrintDebug({
+                        printer_name: name,
+                        printer_address: address,
+                        bridge_available: isAndroidBridgeAvailable(),
+                        status: 'Client-side render failed: ' + (renderErr && renderErr.message ? renderErr.message : renderErr)
+                    });
+                } catch (e2) {}
+            }
+            reject(renderErr instanceof Error ? renderErr : new Error(String(renderErr)));
+        });
     });
 }
 
@@ -2277,10 +2064,6 @@ function printViaSunmiAndroidBridge(receipt) {
         }
 
         window.__bluetoothPrintActive = true;
-        showPrintDebugPanel('Sunmi', 'Inner Printer', 'internal');
-        var _sunmiModel = window.__sunmiPrinterModel || 'unknown';
-        printDebugLog('Printer model: <span style="color:#86efac;">' + _sunmiModel + '</span>');
-
         var requestId = 'android-sunmi-print-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
         var timeout = null;
         var fetchAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -2328,11 +2111,11 @@ function printViaSunmiAndroidBridge(receipt) {
             timeout = setTimeout(function() {
                 window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
                 window.removeEventListener('zat-sunmi-debug-log', onJavaDebugLog);
-                printDebugLog('<span style="color:#fbbf24;">No response from Sunmi service after 6s — resolving anyway</span>');
+                printDebugLog('<span style="color:#fbbf24;">No response from Sunmi service after 20s — resolving anyway</span>');
                 updatePrintStatus('Timeout (no ack)', '#fbbf24');
                 window.__bluetoothPrintActive = false;
                 resolve({ requestId: requestId, status: 'sent' });
-            }, 15000);
+            }, 20000);
             window.ReactNativeWebView.postMessage(JSON.stringify(
                 Object.assign({ type: 'sunmi_inner_print_receipt', requestId: requestId }, payload)
             ));
@@ -2369,7 +2152,15 @@ function printViaSunmiAndroidBridge(receipt) {
             return;
         }
 
-        // 2. Fetch server-generated ESC/POS if we have a transaction_id
+        // 2. If caller explicitly said to use local HTML (mobile compact template),
+        // render directly and skip the server fetch — the server returns the A4 layout.
+        if (receipt && receipt.use_local_html && receipt.html_content) {
+            printDebugLog('use_local_html flag set — rendering local html_content, skipping /print/receipt fetch');
+            renderAndSend();
+            return;
+        }
+
+        // 3. Fetch server-generated ESC/POS if we have a transaction_id
         var transactionId = receipt && receipt.transaction_id;
         if (transactionId && typeof fetch === 'function') {
             printDebugLog('Fetching /print/receipt for transaction ' + transactionId + '...');

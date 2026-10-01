@@ -2321,13 +2321,48 @@ createApp({
         // ════════════════════════════════════════════════════════════════════
 
         const printReceipt = async (sale, { silent = false } = {}) => {
-            let receipt = getReceiptPayloadForSale(sale)
-                || buildLocalReceiptPayload(
-                    sale, settings.value, locations.value, printers.value,
-                    invoiceLayouts.value, receiptTemplate.value, business.value, receiptTemplateDesign.value,
-                    localPrinterName.value,
-                    localPrinters.value,
+            // Mobile thermal printers (Bluetooth/WiFi/Sunmi) must use the compact local
+            // template. sale.server_receipt is the cloud-rendered A4 invoice (with table
+            // borders and fixed widths) — it renders as narrow stretched columns on 58/80mm
+            // paper. The local template is designed for thermal width. Desktop keeps its
+            // existing preference for server_receipt when available.
+            const isMobileApp = !!window.platformAPI?.isCapacitor?.();
+            // On mobile (Android/Capacitor) we build a self-contained thermal receipt
+            // from scratch and ignore both sale.server_receipt (cloud A4 invoice) and
+            // receiptTemplate.value (the cloud wrapper — also A4 in most tenants).
+            // buildMobileThermalReceiptHtml uses only slim/slim2 item+totals builders,
+            // wraps them in minimal inline CSS, and puts the ZATCA QR at the bottom
+            // in its own centered block. No outer table, no borders.
+            let receipt;
+            if (isMobileApp) {
+                let targetWidthPx = 384;
+                if (selectedPrinterType.value === 'sunmi' && sunmiPrinterAvailable.value) {
+                    targetWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
+                } else if (selectedPrinterType.value === 'bluetooth' || selectedPrinterType.value === 'wifi') {
+                    targetWidthPx = 576;
+                }
+                const mobileHtml = buildMobileThermalReceiptHtml(
+                    sale, settings.value, business.value, locations.value,
+                    invoiceLayouts.value, targetWidthPx,
                 );
+                receipt = {
+                    is_enabled: true,
+                    print_type: 'browser',
+                    print_title: sale.server_invoice_no || sale.invoice_no || 'Receipt',
+                    transaction_id: sale.server_id || null,
+                    html_content: mobileHtml,
+                    use_local_html: true,
+                    thermal_width: targetWidthPx,
+                };
+            } else {
+                receipt = getReceiptPayloadForSale(sale)
+                    || buildLocalReceiptPayload(
+                        sale, settings.value, locations.value, printers.value,
+                        invoiceLayouts.value, receiptTemplate.value, business.value, receiptTemplateDesign.value,
+                        localPrinterName.value,
+                        localPrinters.value,
+                    );
+            }
             if (!receipt) {
                 if (!silent) toast(t('no_invoice_template'), 'error');
                 return false;
@@ -2669,7 +2704,6 @@ createApp({
         /** Ask the native Android shell to (re)send its paired-Bluetooth-device list. */
         const scanBluetoothPrinters = () => {
             isScanningBluetoothPrinters.value = true;
-            window.showBluetoothScanDebug?.();
             try {
                 window.ReactNativeWebView?.postMessage?.(JSON.stringify({ type: 'request_bluetooth_scan' }));
             } catch { /* ignore */ }

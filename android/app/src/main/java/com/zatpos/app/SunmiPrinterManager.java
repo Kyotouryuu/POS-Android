@@ -27,6 +27,12 @@ public class SunmiPrinterManager {
     private IWoyouService woyouService = null;
     private boolean available = false;
 
+    // Strong-reference holder for AIDL callbacks. Sunmi's binder proxy stores only a
+    // WeakReference to the Stub; if the JVM GCs our local var before the service
+    // dispatches the callback, it silently drops the invocation. Keeping the most
+    // recent batch alive here prevents that.
+    private final java.util.List<ICallback> pendingCallbacks = new java.util.concurrent.CopyOnWriteArrayList<>();
+
     private final ServiceConnection connection = new ServiceConnection() {
         @Override
         public void onServiceConnected(ComponentName name, IBinder service) {
@@ -34,7 +40,8 @@ public class SunmiPrinterManager {
             available = true;
             String model = "unknown";
             try {
-                String m = woyouService.getPrinterModel();
+                // Note: Sunmi's official AIDL spells this "getPrinterModal" (typo baked into the public API).
+                String m = woyouService.getPrinterModal();
                 if (m != null && !m.isEmpty()) model = m;
                 Log.i(TAG, "Sunmi inner printer connected — model: " + model);
             } catch (Exception e) {
@@ -97,36 +104,60 @@ public class SunmiPrinterManager {
                         sendPrintResult(requestId, false, "Failed to decode PNG for Sunmi printing");
                         return;
                     }
-                    // Convert to RGB_565 — halves the Binder payload (~0.8MB vs 1.6MB for ARGB_8888).
-                    Bitmap rgb = bitmap.copy(Bitmap.Config.RGB_565, false);
-                    if (rgb == null) rgb = bitmap;
-                    sendDebugLog(requestId, "Java: bitmap " + rgb.getWidth() + "x" + rgb.getHeight()
-                        + " RGB565, calling printerInit...");
+                    // Sunmi V2 firmwares silently no-op printBitmap when given RGB_565 —
+                    // onRunResult fires true but no ink hits paper. Force ARGB_8888.
+                    Bitmap argb = bitmap.getConfig() == Bitmap.Config.ARGB_8888
+                        ? bitmap
+                        : bitmap.copy(Bitmap.Config.ARGB_8888, false);
+                    if (argb == null) argb = bitmap;
+
+                    // Slice into ≤256-row strips (~384KB each, safely under 1MB Binder cap) and
+                    // wrap the whole batch in enterPrinterBuffer(true) / commitPrinterBufferWithCallback(cb).
+                    // Only the commit callback fires reliably — per-strip printBitmap callbacks in
+                    // buffer mode are documented as fire-and-forget.
+                    int stripHeight = 256;
+                    int totalHeight = argb.getHeight();
+                    int stripCount = (totalHeight + stripHeight - 1) / stripHeight;
+                    sendDebugLog(requestId, "Java: bitmap " + argb.getWidth() + "x" + totalHeight
+                        + " ARGB8888 → " + stripCount + " strip(s), enterPrinterBuffer...");
+
+                    pendingCallbacks.clear();
                     woyouService.printerInit(null);
-                    sendDebugLog(requestId, "Java: calling printBitmap...");
-                    final Bitmap finalBmp = rgb;
-                    final String[] cbResult = {null}; // null = pending, "ok" or "err:..." after callback
-                    ICallback.Stub cb = new ICallback.Stub() {
-                        @Override public void onRunResult(boolean ok) { cbResult[0] = ok ? "ok" : "err:onRunResult false"; }
-                        @Override public void onReturnString(String s) {}
-                        @Override public void onRaiseException(int code, String msg2) { cbResult[0] = "err:" + code + " " + msg2; }
-                        @Override public void onPrintResult(int code, String msg2) { cbResult[0] = code == 0 ? "ok" : "err:" + code + " " + msg2; }
-                    };
-                    woyouService.printBitmap(finalBmp, cb);
-                    // Wait up to 8s for the callback, then treat as success (many Sunmi firmwares never call it).
-                    for (int i = 0; i < 80 && cbResult[0] == null; i++) {
-                        Thread.sleep(100);
+                    woyouService.enterPrinterBuffer(true);
+
+                    for (int i = 0; i < stripCount; i++) {
+                        int y = i * stripHeight;
+                        int h = Math.min(stripHeight, totalHeight - y);
+                        Bitmap strip = Bitmap.createBitmap(argb, 0, y, argb.getWidth(), h);
+                        sendDebugLog(requestId, "Java: buffer printBitmap strip " + (i + 1) + "/" + stripCount + " (" + h + " rows)");
+                        woyouService.printBitmap(strip, null);
+                        try { if (strip != argb) strip.recycle(); } catch (Exception ignored) {}
                     }
-                    if (cbResult[0] == null) {
-                        sendDebugLog(requestId, "Java: callback never fired — feeding paper anyway");
-                        woyouService.sendRAWData(new byte[]{0x1b, 0x64, 0x05}, null);
+
+                    // lineWrap inside the buffer to feed the last strip past the head.
+                    woyouService.lineWrap(3, null);
+
+                    sendDebugLog(requestId, "Java: commitPrinterBufferWithCallback — waiting for real completion");
+                    final String[] commitResult = {null};
+                    ICallback.Stub commitCb = new ICallback.Stub() {
+                        @Override public void onRunResult(boolean ok) { commitResult[0] = ok ? "ok" : "err:onRunResult false"; }
+                        @Override public void onReturnString(String s) {}
+                        @Override public void onRaiseException(int code, String msg2) { commitResult[0] = "err:" + code + " " + msg2; }
+                        @Override public void onPrintResult(int code, String msg2) { commitResult[0] = code == 0 ? "ok" : "err:" + code + " " + msg2; }
+                    };
+                    pendingCallbacks.add(commitCb);
+                    woyouService.commitPrinterBufferWithCallback(commitCb);
+                    for (int w = 0; w < 150 && commitResult[0] == null; w++) Thread.sleep(100);
+
+                    if (commitResult[0] == null) {
+                        sendDebugLog(requestId, "Java: commit callback never fired in 15s — assuming printed");
                         sendPrintResult(requestId, true, null);
-                    } else if (cbResult[0].startsWith("err:")) {
-                        sendDebugLog(requestId, "Java: callback error — " + cbResult[0]);
-                        sendPrintResult(requestId, false, cbResult[0].substring(4));
+                    } else if (commitResult[0].startsWith("err:")) {
+                        String err = commitResult[0].substring(4);
+                        sendDebugLog(requestId, "Java: commit error — " + err);
+                        sendPrintResult(requestId, false, err);
                     } else {
-                        sendDebugLog(requestId, "Java: callback OK");
-                        woyouService.sendRAWData(new byte[]{0x1b, 0x64, 0x05}, null);
+                        sendDebugLog(requestId, "Java: commit OK — paper printed");
                         sendPrintResult(requestId, true, null);
                     }
                     return;
