@@ -7,6 +7,7 @@ const ANDROID_APP_BLUETOOTH_DEVICES_EVENT = 'zat-android-bluetooth-devices';
 const ANDROID_APP_USB_DEVICES_EVENT = 'zat-android-usb-devices';
 const HTML2CANVAS_CDN_URL = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
 const BLUETOOTH_THERMAL_WIDTH = 576;
+const SUNMI_THERMAL_WIDTH = 384; // 58mm paper at 203dpi — fallback; actual width driven by sunmiPaperWidthMm (58=384px, 80=576px)
 const BLUETOOTH_CAPTURE_WORKSPACE_WIDTH = 320;
 let androidBluetoothPrintersCache = [];
 let androidUsbPrintersCache = [];
@@ -120,9 +121,12 @@ function normalizeUsbPrinterDevices(devices) {
         });
 }
 
-function setAvailableBluetoothPrinters(devices, requestId = null) {
-    androidBluetoothPrintersCache = normalizeBluetoothPrinterDevices(devices);
+function _setAvailableBluetoothPrintersImpl(devices, requestId = null, meta = null) {
+    var raw = Array.isArray(devices) ? devices : [];
+    androidBluetoothPrintersCache = normalizeBluetoothPrinterDevices(raw);
     console.log('Normalized bluetooth printers cache:', androidBluetoothPrintersCache);
+
+    updateBluetoothScanDebug(raw, androidBluetoothPrintersCache.slice(), meta);
 
     if (window.printerTray && typeof window.printerTray.updateBluetoothDropdown === 'function') {
         window.printerTray.updateBluetoothDropdown(androidBluetoothPrintersCache.slice());
@@ -141,7 +145,7 @@ function setAvailableBluetoothPrinters(devices, requestId = null) {
     return androidBluetoothPrintersCache.slice();
 }
 
-function setAvailableUsbPrinters(devices, requestId = null) {
+function _setAvailableUsbPrintersImpl(devices, requestId = null) {
     androidUsbPrintersCache = normalizeUsbPrinterDevices(devices);
     console.log('Normalized USB printers cache:', androidUsbPrintersCache);
 
@@ -237,13 +241,13 @@ function handleBluetoothPrintersMessageEvent(event) {
     handleBridgeMessageEvent(event);
 }
 
-window.printerTray.setAvailableBluetoothPrinters = function(devices, requestId) {
+window.printerTray.setAvailableBluetoothPrinters = function(devices, requestId, meta) {
     console.log('Received bluetooth printers:', devices);
-    return setAvailableBluetoothPrinters(devices, requestId);
+    return _setAvailableBluetoothPrintersImpl(devices, requestId, meta);
 };
 window.printerTray.setAvailableUsbPrinters = function(devices, requestId) {
     console.log('Received USB printers:', devices);
-    return setAvailableUsbPrinters(devices, requestId);
+    return _setAvailableUsbPrintersImpl(devices, requestId);
 };
 
 /**
@@ -287,16 +291,42 @@ document.addEventListener('message', handleBluetoothPrintersMessageEvent);
 function handleAppBluetoothDevicesEvent(event) {
     var detail = event && event.detail;
     if (!detail) {
+        btScanDebugLog('JS: handleAppBluetoothDevicesEvent — no detail, returning');
         return;
     }
-    var devices = Array.isArray(detail.devices) ? detail.devices : (Array.isArray(detail) ? detail : []);
-    if (devices.length) {
-        console.log('Bluetooth devices from app event:', devices);
-        window.printerTray.setAvailableBluetoothPrinters(devices, detail.requestId || null);
-    }
+    var rawDevices = Array.isArray(detail.devices) ? detail.devices : (Array.isArray(detail) ? detail : []);
+    btScanDebugLog('JS: handleAppBluetoothDevicesEvent — ' + rawDevices.length + ' device(s)');
+    console.log('Bluetooth devices from app event:', rawDevices);
+    window.printerTray.setAvailableBluetoothPrinters(rawDevices, detail.requestId || null, detail);
 }
 window.addEventListener(ANDROID_APP_BLUETOOTH_DEVICES_EVENT, handleAppBluetoothDevicesEvent);
 document.addEventListener(ANDROID_APP_BLUETOOTH_DEVICES_EVENT, handleAppBluetoothDevicesEvent);
+
+// Direct-call entry point for Java to bypass CustomEvent (which can fail silently for larger payloads).
+// setTimeout(0) unwinds the evaluateJavascript call stack before processing to avoid stack overflow.
+window.__onAndroidBluetoothDevices = function(detail) {
+    btScanDebugLog('JS: __onAndroidBluetoothDevices called, devices=' + (detail && detail.devices ? detail.devices.length : '?'));
+    setTimeout(function() {
+        try {
+            handleAppBluetoothDevicesEvent({ detail: detail });
+        } catch(e) {
+            btScanDebugLog('JS ERR in __onAndroidBluetoothDevices: ' + e.message);
+        }
+    }, 0);
+};
+
+function handleBtScanAckEvent() {}
+window.addEventListener('zat-android-bt-scan-ack', handleBtScanAckEvent);
+document.addEventListener('zat-android-bt-scan-ack', handleBtScanAckEvent);
+
+window.addEventListener('zat-android-bt-scan-log', function(e) {
+    var msg = e && e.detail && e.detail.msg ? e.detail.msg : String(e && e.detail);
+    btScanDebugLog('<span style="color:#93c5fd;">Java: ' + msg + '</span>');
+});
+document.addEventListener('zat-android-bt-scan-log', function(e) {
+    var msg = e && e.detail && e.detail.msg ? e.detail.msg : String(e && e.detail);
+    btScanDebugLog('<span style="color:#93c5fd;">Java: ' + msg + '</span>');
+});
 
 function handleAppUsbDevicesEvent(event) {
     var detail = event && event.detail;
@@ -395,6 +425,7 @@ function requestBluetoothScan() {
     console.log('Bridge available:', isAndroidBridgeAvailable());
     if (!isAndroidBridgeAvailable()) {
         console.warn('Android bridge not available');
+        btScanDebugLog('<span style="color:#f87171;">Bridge not available — ReactNativeWebView missing</span>');
         return;
     }
     window.ReactNativeWebView.postMessage(JSON.stringify({
@@ -654,16 +685,23 @@ function getPrintableRoot(scope) {
     return candidates.length ? candidates[0] : null;
 }
 
-function createTemporaryPrintableHost(htmlContent) {
+function createTemporaryPrintableHost(htmlContent, targetWidthPx) {
+    // targetWidthPx lets the caller lay out at the actual thermal width (e.g. 384 for
+    // 58mm, 576 for 80mm) instead of the default 320px workspace. When our own compact
+    // template is used, laying out at native thermal width avoids browser wrapping the
+    // Arabic text one-char-per-line and then html2canvas scaling it up fuzzily.
+    var workspaceWidth = (typeof targetWidthPx === 'number' && targetWidthPx >= 200)
+        ? Math.floor(targetWidthPx)
+        : BLUETOOTH_CAPTURE_WORKSPACE_WIDTH;
     var host = document.createElement('div');
     host.setAttribute('data-receipt-capture-host', 'true');
     host.style.cssText = [
         'position:fixed',
         'left:-10000px',
         'top:0',
-        'width:' + BLUETOOTH_CAPTURE_WORKSPACE_WIDTH + 'px',
-        'min-width:' + BLUETOOTH_CAPTURE_WORKSPACE_WIDTH + 'px',
-        'max-width:' + BLUETOOTH_CAPTURE_WORKSPACE_WIDTH + 'px',
+        'width:' + workspaceWidth + 'px',
+        'min-width:' + workspaceWidth + 'px',
+        'max-width:' + workspaceWidth + 'px',
         'background:#fff',
         'color:#000',
         'display:block',
@@ -688,9 +726,9 @@ function createTemporaryPrintableHost(htmlContent) {
         'display:block',
         'visibility:visible',
         'opacity:1',
-        'width:' + BLUETOOTH_CAPTURE_WORKSPACE_WIDTH + 'px',
-        'min-width:' + BLUETOOTH_CAPTURE_WORKSPACE_WIDTH + 'px',
-        'max-width:' + BLUETOOTH_CAPTURE_WORKSPACE_WIDTH + 'px',
+        'width:' + workspaceWidth + 'px',
+        'min-width:' + workspaceWidth + 'px',
+        'max-width:' + workspaceWidth + 'px',
         'margin:0 auto',
         'padding:0',
         'box-sizing:border-box',
@@ -993,7 +1031,8 @@ function waitForPrintableAssets(root) {
     });
 }
 
-async function renderReceiptToThermalCanvas(receipt) {
+async function renderReceiptToThermalCanvas(receipt, thermalWidth) {
+    if (!thermalWidth || thermalWidth < 100) thermalWidth = BLUETOOTH_THERMAL_WIDTH;
     await loadHtml2Canvas();
 
     var cleanup = null;
@@ -1002,7 +1041,9 @@ async function renderReceiptToThermalCanvas(receipt) {
     var savedTransformOrigin;
 
     if (receipt && receipt.html_content) {
-        var tempRender = createTemporaryPrintableHost(receipt.html_content);
+        // Lay out at the actual thermal width so the compact template renders natively
+        // (no shrinking of text below readable) and no fuzzy upscale by html2canvas.
+        var tempRender = createTemporaryPrintableHost(receipt.html_content, thermalWidth);
         cleanup = tempRender.cleanup;
         root = tempRender.root;
     } else {
@@ -1027,7 +1068,7 @@ async function renderReceiptToThermalCanvas(receipt) {
         root.setAttribute('data-bt-capture-id', captureId);
 
         var originalWidth = root.getBoundingClientRect().width;
-        var scale = originalWidth > 0 ? BLUETOOTH_THERMAL_WIDTH / originalWidth : 1;
+        var scale = originalWidth > 0 ? thermalWidth / originalWidth : 1;
         savedTransform = root.style.transform;
         savedTransformOrigin = root.style.transformOrigin;
 
@@ -1041,11 +1082,44 @@ async function renderReceiptToThermalCanvas(receipt) {
             useCORS: true,
             logging: false,
             imageTimeout: 0,
-            width: BLUETOOTH_THERMAL_WIDTH,
+            width: thermalWidth,
             windowWidth: Math.ceil(originalWidth),
             onclone: function(clonedDoc) {
                 var fixStyle = clonedDoc.createElement('style');
-                fixStyle.textContent = 'hr{border:none!important;border-top:2px solid #000!important;height:0!important;margin:8px 0!important;display:block!important;visibility:visible!important;opacity:1!important}table,th,td{border-color:#000!important}*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important}';
+                var is58mm = thermalWidth <= 400;
+                // Shared thermal legibility overrides: pure black on white, larger
+                // minimum font, heavier weight to compensate for faint thermal head burn.
+                var rules = [
+                    'hr{border:none!important;border-top:2px solid #000!important;height:0!important;margin:8px 0!important;display:block!important;visibility:visible!important;opacity:1!important}',
+                    'table,th,td{border-color:#000!important}',
+                    'body,p,div,span,td,th,li,strong,em{color:#000!important;font-weight:600!important;-webkit-text-stroke:0.15px #000!important}',
+                    'h1,h2,h3,h4,strong,b{font-weight:800!important;-webkit-text-stroke:0.4px #000!important}',
+                    'img{filter:contrast(1.6) brightness(0.85)!important;max-width:100%!important;height:auto!important}',
+                    '*{-webkit-print-color-adjust:exact!important;print-color-adjust:exact!important;color:#000!important}'
+                ];
+                if (is58mm) {
+                    // 58mm (~384px @ 203dpi, ~32 chars/line). Conventions:
+                    //   - No side-by-side tabular columns beyond 2 — stack numeric rows vertically
+                    //   - Tighter padding (paper is narrow, wasted margins hurt)
+                    //   - QR max ~130px so it fits with breathing room
+                    //   - Slightly smaller base font than 80mm since content must reflow narrower
+                    rules.push('body{font-size:13px!important;line-height:1.35!important;padding:2px!important;margin:0!important}');
+                    rules.push('th,td{padding:2px 3px!important;font-size:13px!important;line-height:1.3!important;word-break:break-word!important;white-space:normal!important}');
+                    rules.push('small,.f-8{font-size:10px!important}');
+                    // Force item tables to single-column stack: any table with >2 cols in the row
+                    // typically means qty/price/total — hide separator cells and rely on slim2's
+                    // built-in flex numeric row.
+                    rules.push('svg{max-width:130px!important;height:auto!important;display:block!important;margin:6px auto!important}');
+                    rules.push('.slim2-numeric-row{gap:6px!important;font-size:12px!important}');
+                    rules.push('.slim-line-items-header,.slim-line-items-table th{font-size:11px!important;padding:2px!important}');
+                } else {
+                    // 80mm (~576px @ 203dpi, ~48 chars/line): more breathing room, larger baseline.
+                    rules.push('body{font-size:14px!important;line-height:1.4!important}');
+                    rules.push('th,td{padding:4px 5px!important;font-size:14px!important;line-height:1.35!important}');
+                    rules.push('small{font-size:12px!important}');
+                    rules.push('svg{max-width:180px!important;height:auto!important}');
+                }
+                fixStyle.textContent = rules.join('');
                 clonedDoc.head.appendChild(fixStyle);
                 var clonedRoot = clonedDoc.querySelector('[data-bt-capture-id="' + captureId + '"]');
                 if (clonedRoot) {
@@ -1060,7 +1134,7 @@ async function renderReceiptToThermalCanvas(receipt) {
         root.style.transformOrigin = savedTransformOrigin;
         root.removeAttribute('data-bt-capture-id');
         var croppedCanvas = cropCanvasToContent(canvas, 20);
-        return resizeCanvasToThermalWidth(croppedCanvas, BLUETOOTH_THERMAL_WIDTH);
+        return resizeCanvasToThermalWidth(croppedCanvas, thermalWidth);
     } finally {
         if (root) {
             if (root.removeAttribute) {
@@ -1093,90 +1167,24 @@ async function captureReceiptWifiThermalPayloads(receipt) {
     return { raster_png_base64: png, escpos_base64: escpos };
 }
 
-/**
- * Only show Bluetooth overlay when a Bluetooth print is in progress (guarded by __bluetoothPrintActive).
- * Set from printViaAndroidBridge; cleared after terminal state or after overlay hide delay.
- */
-function showBluetoothPrintDebug(info, payloadSent) {
-    if (!window.__bluetoothPrintActive) {
-        return;
-    }
-    var id = 'pos_bluetooth_print_debug';
-    var el = document.getElementById(id);
-    if (!el) {
-        el = document.createElement('div');
-        el.id = id;
-        el.style.cssText = 'position:fixed;bottom:12px;left:12px;max-width:400px;padding:10px 12px;' +
-            'background:rgba(0,0,0,0.88);color:#b8e986;font-family:monospace;font-size:12px;line-height:1.4;' +
-            'border-radius:6px;z-index:99999;box-shadow:0 2px 12px rgba(0,0,0,0.4);white-space:pre-wrap;word-break:break-all;pointer-events:none;';
-        document.body.appendChild(el);
-    }
-    var state = el._debugState || {
-        printer_name: '(not set)',
-        printer_address: '(not set)',
-        bridge_available: false,
-        status: '',
-        payload: null
-    };
-    if (info) {
-        if (info.printer_name != null) {
-            state.printer_name = info.printer_name;
-        }
-        if (info.printer_address != null) {
-            state.printer_address = info.printer_address;
-        }
-        if (info.bridge_available != null) {
-            state.bridge_available = !!info.bridge_available;
-        }
-        if (info.status != null) {
-            state.status = info.status;
-        }
-    }
-    if (payloadSent) {
-        state.payload = payloadSent;
-        if (payloadSent.bluetooth_printer_name) {
-            state.printer_name = payloadSent.bluetooth_printer_name;
-        }
-        if (payloadSent.bluetooth_printer_address) {
-            state.printer_address = payloadSent.bluetooth_printer_address;
-        }
-    }
-    el._debugState = state;
+function printDebugLog() {}
+function updatePrintStatus() {}
+function showPrintDebugPanel() {}
+function showBluetoothPrintDebug() {}
 
-    var lines = [
-        '[Bluetooth print]',
-        'Printer: ' + state.printer_name,
-        'MAC: ' + state.printer_address,
-        'Bridge: ' + (state.bridge_available ? 'OK' : 'MISSING'),
-        '---',
-        state.status || '(waiting)'
-    ];
-    if (state.payload) {
-        if (state.payload.command_count != null) {
-            lines.push('Sent to app: ' + state.payload.command_count + ' command(s)');
-        }
-        if (state.payload.request_id) {
-            lines.push('Request: ' + state.payload.request_id);
-        }
-        if (state.payload.server_commands != null) {
-            lines.push('Server /print/receipt: ' + state.payload.server_commands + ' command(s)');
-        }
-        if (state.payload.source) {
-            lines.push('Source: ' + state.payload.source);
-        }
-    }
-    el.innerHTML = lines.join('\n').replace(/\n/g, '<br>');
-    el.style.display = 'block';
-    if (el._hideTimer) {
-        clearTimeout(el._hideTimer);
-    }
-    el._hideTimer = setTimeout(function() {
-        el.style.display = 'none';
-        window.__bluetoothPrintActive = false;
-    }, 12000);
-}
-
+window.__bluetoothPrintDebug = showBluetoothPrintDebug;
 window.showBluetoothPrintDebug = showBluetoothPrintDebug;
+window.showPrintDebugPanel = showPrintDebugPanel;
+window.printDebugLog = printDebugLog;
+window.updatePrintStatus = updatePrintStatus;
+
+function btScanDebugLog() {}
+function showBluetoothScanDebug() {}
+function updateBluetoothScanDebug() {}
+
+window.showBluetoothScanDebug = showBluetoothScanDebug;
+window.updateBluetoothScanDebug = updateBluetoothScanDebug;
+
 
 // Send receipt payload to Android app (ReactNative WebView bridge) for bluetooth printing.
 // Prefers print-ready image from POST /print/receipt when receipt.transaction_id is present.
@@ -1231,11 +1239,18 @@ function printViaAndroidBridge(receipt) {
             return;
         }
 
+        var fetchAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+
         function sendPayload(payload, opts) {
             opts = opts || {};
+            // Remove before adding so we never accumulate duplicate listeners.
+            window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
             window.addEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+            clearTimeout(timeout);
             timeout = setTimeout(function() {
                 window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+                // Abort any in-flight fetch so it doesn't call sendPayload a second time.
+                if (fetchAbortController) fetchAbortController.abort();
                 clearActiveLater();
                 resolve({ requestId: requestId, status: 'sent' });
             }, 4000);
@@ -1284,6 +1299,40 @@ function printViaAndroidBridge(receipt) {
             return;
         }
 
+        // If caller explicitly said to use local HTML (mobile compact template), render
+        // client-side and skip /print/receipt — the server returns the A4 layout which
+        // renders as bordered tables and side-by-side QR on thermal paper.
+        if (receipt && receipt.use_local_html && htmlContent) {
+            if (typeof window.__bluetoothPrintDebug === 'function') {
+                try {
+                    window.__bluetoothPrintDebug({
+                        printer_name: name,
+                        printer_address: address,
+                        bridge_available: isAndroidBridgeAvailable(),
+                        status: 'use_local_html — rendering compact template client-side, skipping /print/receipt'
+                    });
+                } catch (e) {}
+            }
+            captureReceiptWifiThermalPayloads({ html_content: htmlContent }).then(function(payloads) {
+                var fallback = {
+                    type: 'bluetooth_print_receipt',
+                    requestId: requestId,
+                    address: address,
+                    name: name,
+                    bluetooth_printer_mac: address,
+                    bluetooth_printer_name: name,
+                    escpos_base64: payloads.escpos_base64,
+                    thermal_width: BLUETOOTH_THERMAL_WIDTH
+                };
+                var kb = Math.round((payloads.escpos_base64.length * 0.75) / 1024);
+                sendPayload(fallback, { status: 'Sent ESC/POS raster (' + kb + ' KB) to app', source: 'local-html' });
+            }).catch(function(renderErr) {
+                window.__bluetoothPrintActive = false;
+                reject(renderErr instanceof Error ? renderErr : new Error(String(renderErr)));
+            });
+            return;
+        }
+
         var transactionId = receipt && receipt.transaction_id;
         if (transactionId && typeof fetch === 'function') {
             if (typeof window.__bluetoothPrintDebug === 'function') {
@@ -1305,7 +1354,8 @@ function printViaAndroidBridge(receipt) {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify({ transaction_id: transactionId }),
-                credentials: 'same-origin'
+                credentials: 'same-origin',
+                signal: fetchAbortController ? fetchAbortController.signal : undefined
             }).then(function(res) { return res.json(); }).then(function(data) {
                 var cmdCount = Array.isArray(data.commands) ? data.commands.length : 0;
                 if (data.success && cmdCount > 0) {
@@ -1341,10 +1391,44 @@ function printViaAndroidBridge(receipt) {
                                 printer_name: name,
                                 printer_address: address,
                                 bridge_available: isAndroidBridgeAvailable(),
-                                status: 'Server returned no commands (success=' + !!data.success + '). Using HTML fallback.'
+                                status: 'Server returned no commands (success=' + !!data.success + '). Rendering HTML → ESC/POS raster client-side...'
                             });
                         } catch (e) {}
                     }
+                    var fallbackHtml = htmlContent || (data && data.html_content) || '';
+                    captureReceiptWifiThermalPayloads({ html_content: fallbackHtml }).then(function(payloads) {
+                        var fallback = {
+                            type: 'bluetooth_print_receipt',
+                            requestId: requestId,
+                            address: address,
+                            name: name,
+                            bluetooth_printer_mac: address,
+                            bluetooth_printer_name: name,
+                            escpos_base64: payloads.escpos_base64,
+                            thermal_width: BLUETOOTH_THERMAL_WIDTH
+                        };
+                        var kb = Math.round((payloads.escpos_base64.length * 0.75) / 1024);
+                        sendPayload(fallback, { status: 'Sent ESC/POS raster (' + kb + ' KB) to app', source: '/print/receipt-render' });
+                    }).catch(function(renderErr) {
+                        window.__bluetoothPrintActive = false;
+                        reject(renderErr instanceof Error ? renderErr : new Error(String(renderErr)));
+                    });
+                }
+            }).catch(function(err) {
+                // AbortError = timeout already resolved and cancelled us; stay silent.
+                if (err && err.name === 'AbortError') return;
+                console.warn('Bluetooth: /print/receipt failed, rendering HTML fallback client-side', err);
+                if (typeof window.__bluetoothPrintDebug === 'function') {
+                    try {
+                        window.__bluetoothPrintDebug({
+                            printer_name: name,
+                            printer_address: address,
+                            bridge_available: isAndroidBridgeAvailable(),
+                            status: 'Fetch failed: ' + (err && err.message ? err.message : err) + '. Rendering HTML → ESC/POS raster client-side...'
+                        });
+                    } catch (e2) {}
+                }
+                captureReceiptWifiThermalPayloads({ html_content: htmlContent }).then(function(payloads) {
                     var fallback = {
                         type: 'bluetooth_print_receipt',
                         requestId: requestId,
@@ -1352,34 +1436,15 @@ function printViaAndroidBridge(receipt) {
                         name: name,
                         bluetooth_printer_mac: address,
                         bluetooth_printer_name: name,
-                        html_content: htmlContent || (data && data.html_content) || '',
+                        escpos_base64: payloads.escpos_base64,
                         thermal_width: BLUETOOTH_THERMAL_WIDTH
                     };
-                    sendPayload(fallback, { status: 'HTML fallback sent to app', source: '/print/receipt' });
-                }
-            }).catch(function(err) {
-                console.warn('Bluetooth: /print/receipt failed, sending HTML fallback', err);
-                if (typeof window.__bluetoothPrintDebug === 'function') {
-                    try {
-                        window.__bluetoothPrintDebug({
-                            printer_name: name,
-                            printer_address: address,
-                            bridge_available: isAndroidBridgeAvailable(),
-                            status: 'Fetch failed: ' + (err && err.message ? err.message : err) + '. Using HTML fallback.'
-                        });
-                    } catch (e2) {}
-                }
-                var fallback = {
-                    type: 'bluetooth_print_receipt',
-                    requestId: requestId,
-                    address: address,
-                    name: name,
-                    bluetooth_printer_mac: address,
-                    bluetooth_printer_name: name,
-                    html_content: htmlContent,
-                    thermal_width: BLUETOOTH_THERMAL_WIDTH
-                };
-                sendPayload(fallback, { status: 'HTML fallback sent to app' });
+                    var kb = Math.round((payloads.escpos_base64.length * 0.75) / 1024);
+                    sendPayload(fallback, { status: 'Sent ESC/POS raster (' + kb + ' KB) to app', source: 'inline-render' });
+                }).catch(function(renderErr) {
+                    window.__bluetoothPrintActive = false;
+                    reject(renderErr instanceof Error ? renderErr : new Error(String(renderErr)));
+                });
             });
             return;
         }
@@ -1390,21 +1455,37 @@ function printViaAndroidBridge(receipt) {
                     printer_name: name,
                     printer_address: address,
                     bridge_available: isAndroidBridgeAvailable(),
-                    status: 'No transaction_id; sending HTML content to app.'
+                    status: 'No transaction_id; rendering HTML → ESC/POS raster client-side...'
                 });
             } catch (e) {}
         }
-        var payload = {
-            type: 'bluetooth_print_receipt',
-            requestId: requestId,
-            address: address,
-            name: name,
-            bluetooth_printer_mac: address,
-            bluetooth_printer_name: name,
-            html_content: htmlContent,
-            thermal_width: BLUETOOTH_THERMAL_WIDTH
-        };
-        sendPayload(payload, { status: 'HTML payload sent to app', source: 'inline' });
+        captureReceiptWifiThermalPayloads({ html_content: htmlContent }).then(function(payloads) {
+            var payload = {
+                type: 'bluetooth_print_receipt',
+                requestId: requestId,
+                address: address,
+                name: name,
+                bluetooth_printer_mac: address,
+                bluetooth_printer_name: name,
+                escpos_base64: payloads.escpos_base64,
+                thermal_width: BLUETOOTH_THERMAL_WIDTH
+            };
+            var kb = Math.round((payloads.escpos_base64.length * 0.75) / 1024);
+            sendPayload(payload, { status: 'Sent ESC/POS raster (' + kb + ' KB) to app', source: 'inline-render' });
+        }).catch(function(renderErr) {
+            window.__bluetoothPrintActive = false;
+            if (typeof window.__bluetoothPrintDebug === 'function') {
+                try {
+                    window.__bluetoothPrintDebug({
+                        printer_name: name,
+                        printer_address: address,
+                        bridge_available: isAndroidBridgeAvailable(),
+                        status: 'Client-side render failed: ' + (renderErr && renderErr.message ? renderErr.message : renderErr)
+                    });
+                } catch (e2) {}
+            }
+            reject(renderErr instanceof Error ? renderErr : new Error(String(renderErr)));
+        });
     });
 }
 
@@ -1458,11 +1539,16 @@ function printViaAndroidUsbBridge(receipt) {
             return;
         }
 
+        var fetchAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+
         function sendPayload(payload, opts) {
             opts = opts || {};
+            window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
             window.addEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+            clearTimeout(timeout);
             timeout = setTimeout(function() {
                 window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+                if (fetchAbortController) fetchAbortController.abort();
                 clearActiveLater();
                 resolve({ requestId: requestId, status: 'sent' });
             }, 4000);
@@ -1519,7 +1605,8 @@ function printViaAndroidUsbBridge(receipt) {
                 method: 'POST',
                 headers: headers,
                 body: JSON.stringify({ transaction_id: transactionId }),
-                credentials: 'same-origin'
+                credentials: 'same-origin',
+                signal: fetchAbortController ? fetchAbortController.signal : undefined
             }).then(function(res) { return res.json(); }).then(function(data) {
                 var cmdCount = Array.isArray(data.commands) ? data.commands.length : 0;
                 if (data.success && cmdCount > 0) {
@@ -1969,6 +2056,147 @@ function printViaAndroidWifiBridge(receipt) {
     });
 }
 
+function printViaSunmiAndroidBridge(receipt) {
+    return new Promise(function(resolve, reject) {
+        if (!isAndroidBridgeAvailable()) {
+            reject(new Error('Android bridge is not available.'));
+            return;
+        }
+
+        window.__bluetoothPrintActive = true;
+        var requestId = 'android-sunmi-print-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
+        var timeout = null;
+        var fetchAbortController = typeof AbortController !== 'undefined' ? new AbortController() : null;
+
+        function onJavaDebugLog(event) {
+            var d = event && event.detail ? event.detail : {};
+            if (d.requestId === requestId && d.log) {
+                printDebugLog('<span style="color:#93c5fd;">' + d.log + '</span>');
+            }
+        }
+        window.addEventListener('zat-sunmi-debug-log', onJavaDebugLog);
+
+        function onBridgeResult(event) {
+            var detail = event && event.detail ? event.detail : {};
+            if (!detail.requestId || detail.requestId !== requestId) {
+                return;
+            }
+            clearTimeout(timeout);
+            window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+            if (detail.success === false) {
+                var errMsg = detail.error || 'Sunmi inner print failed.';
+                printDebugLog('<span style="color:#f87171;">Java: ' + errMsg + '</span>');
+                updatePrintStatus('Failed: ' + errMsg, '#f87171');
+                window.__bluetoothPrintActive = false;
+                window.removeEventListener('zat-sunmi-debug-log', onJavaDebugLog);
+                reject(new Error(errMsg));
+            } else {
+                printDebugLog('<span style="color:#86efac;">Java: print succeeded</span>');
+                updatePrintStatus('Printed OK', '#86efac');
+                window.removeEventListener('zat-sunmi-debug-log', onJavaDebugLog);
+                setTimeout(function() { window.__bluetoothPrintActive = false; }, 3000);
+                resolve(detail);
+            }
+        }
+
+        // payload: { escpos_base64 } for server ESC/POS, { image_base64 } for PNG bitmap
+        function sendSunmiPayload(payload) {
+            var sizeKb = Math.round(((payload.image_base64 || payload.escpos_base64 || '').length * 0.75) / 1024);
+            var mode = payload.image_base64 ? 'PNG bitmap' : 'ESC/POS';
+            window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+            window.addEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+            clearTimeout(timeout);
+            printDebugLog('Sending ' + sizeKb + ' KB ' + mode + ' to Sunmi service...');
+            updatePrintStatus('Sending to Sunmi...', '#fbbf24');
+            timeout = setTimeout(function() {
+                window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+                window.removeEventListener('zat-sunmi-debug-log', onJavaDebugLog);
+                printDebugLog('<span style="color:#fbbf24;">No response from Sunmi service after 20s — resolving anyway</span>');
+                updatePrintStatus('Timeout (no ack)', '#fbbf24');
+                window.__bluetoothPrintActive = false;
+                resolve({ requestId: requestId, status: 'sent' });
+            }, 20000);
+            window.ReactNativeWebView.postMessage(JSON.stringify(
+                Object.assign({ type: 'sunmi_inner_print_receipt', requestId: requestId }, payload)
+            ));
+        }
+
+        var sunmiThermalWidth = (receipt && receipt.thermal_width) ? parseInt(receipt.thermal_width) : SUNMI_THERMAL_WIDTH;
+
+        function renderAndSend() {
+            printDebugLog('Rendering receipt via html2canvas (' + sunmiThermalWidth + 'px)...');
+            updatePrintStatus('Rendering receipt...', '#fbbf24');
+            renderReceiptToThermalCanvas(receipt, sunmiThermalWidth).then(function(canvas) {
+                printDebugLog('Canvas: ' + canvas.width + 'x' + canvas.height + 'px — encoding PNG...');
+                // Send as PNG bitmap — Java uses printBitmap() which works on all Sunmi models.
+                // sendRAWData with GS v 0 raster does not print on many Sunmi firmware versions.
+                var pngB64 = canvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '');
+                printDebugLog('PNG encoded: ' + Math.round(pngB64.length * 0.75 / 1024) + ' KB');
+                sendSunmiPayload({ image_base64: pngB64 });
+            }).catch(function(err) {
+                var msg = err && err.message ? err.message : String(err);
+                console.error('Sunmi: receipt render failed', err);
+                printDebugLog('<span style="color:#f87171;">Render failed: ' + msg + '</span>');
+                updatePrintStatus('Render failed', '#f87171');
+                window.__bluetoothPrintActive = false;
+                reject(new Error('Sunmi receipt render failed: ' + msg));
+            });
+        }
+
+        // 1. Inline escpos_base64 from receipt object (highest priority)
+        var inlineB64 = receipt && (receipt.escpos_base64 || receipt.escposBase64)
+            ? String(receipt.escpos_base64 || receipt.escposBase64).trim() : '';
+        if (inlineB64) {
+            printDebugLog('Using inline escpos_base64 (' + Math.round(inlineB64.length * 0.75 / 1024) + ' KB)');
+            sendSunmiPayload({ escpos_base64: inlineB64 });
+            return;
+        }
+
+        // 2. If caller explicitly said to use local HTML (mobile compact template),
+        // render directly and skip the server fetch — the server returns the A4 layout.
+        if (receipt && receipt.use_local_html && receipt.html_content) {
+            printDebugLog('use_local_html flag set — rendering local html_content, skipping /print/receipt fetch');
+            renderAndSend();
+            return;
+        }
+
+        // 3. Fetch server-generated ESC/POS if we have a transaction_id
+        var transactionId = receipt && receipt.transaction_id;
+        if (transactionId && typeof fetch === 'function') {
+            printDebugLog('Fetching /print/receipt for transaction ' + transactionId + '...');
+            updatePrintStatus('Fetching from server...', '#fbbf24');
+            var printUrl = (typeof window.__printReceiptUrl === 'string' && window.__printReceiptUrl) ? window.__printReceiptUrl : '/print/receipt';
+            var csrfMeta = document.querySelector('meta[name="csrf-token"]');
+            var csrfToken = csrfMeta ? csrfMeta.getAttribute('content') : (document.querySelector('input[name="_token"]') && document.querySelector('input[name="_token"]').value);
+            var headers = { 'Content-Type': 'application/json', 'Accept': 'application/json' };
+            if (csrfToken) headers['X-CSRF-TOKEN'] = csrfToken;
+            fetch(printUrl, {
+                method: 'POST',
+                headers: headers,
+                body: JSON.stringify({ transaction_id: transactionId }),
+                credentials: 'same-origin',
+                signal: fetchAbortController ? fetchAbortController.signal : undefined
+            }).then(function(res) { return res.json(); }).then(function(data) {
+                if (data.success && data.escpos_base64) {
+                    printDebugLog('Server returned escpos_base64 (' + Math.round(data.escpos_base64.length * 0.75 / 1024) + ' KB)');
+                    sendSunmiPayload({ escpos_base64: data.escpos_base64 });
+                } else {
+                    printDebugLog('Server has no escpos_base64 — falling back to render');
+                    renderAndSend();
+                }
+            }).catch(function(err) {
+                if (err && err.name === 'AbortError') return;
+                printDebugLog('Fetch failed (' + (err && err.message ? err.message : err) + ') — falling back to render');
+                renderAndSend();
+            });
+            return;
+        }
+
+        // 3. No transaction_id — render directly
+        renderAndSend();
+    });
+}
+
 // Expose helpers globally for other modules
 window.printerTray.getPrinterTrayHealth = getPrinterTrayHealth;
 window.printerTray.getAvailablePrinters = getAvailablePrinters;
@@ -1985,3 +2213,4 @@ window.printerTray.requestUsbPrintersOnLoad = requestUsbPrintersOnLoad;
 window.printerTray.printViaAndroidBridge = printViaAndroidBridge;
 window.printerTray.printViaAndroidUsbBridge = printViaAndroidUsbBridge;
 window.printerTray.printViaAndroidWifiBridge = printViaAndroidWifiBridge;
+window.printerTray.printViaSunmiAndroidBridge = printViaSunmiAndroidBridge;

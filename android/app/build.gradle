@@ -9,6 +9,9 @@ if (keystorePropertiesFile.exists()) {
 android {
     namespace "com.zatpos.app"
     compileSdk rootProject.ext.compileSdkVersion
+    buildFeatures {
+        aidl true
+    }
     defaultConfig {
         applicationId "com.zatpos.app"
         minSdkVersion rootProject.ext.minSdkVersion

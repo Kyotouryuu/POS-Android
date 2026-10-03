@@ -54,7 +54,10 @@ createApp({
         const isScanningBluetoothPrinters = ref(false);
         const selectedBluetoothPrinterInfo = ref(null);    // { name, address } | null
         const wifiPrinterIp              = ref('');
-        const selectedPrinterType        = ref('');        // '' | 'bluetooth' | 'wifi'
+        const selectedPrinterType        = ref('');        // '' | 'bluetooth' | 'wifi' | 'sunmi'
+        const sunmiPrinterAvailable      = ref(false);
+        const sunmiDetectedModel         = ref('');        // model string injected by SunmiPrinterManager (e.g. 'V2', 'V3 Pro')
+        const sunmiPaperWidthMm          = ref(58);       // 58 | 80 — matches paper roll installed
 
         // ── Settings tabs & printer CRUD ─────────────────────────────────────
         const settingsTab           = ref('general');
@@ -355,6 +358,7 @@ createApp({
         const showConnectForm        = ref(false);
         const connectServerUrl       = ref('https://zaterp.com');
         const connectOtpDigits       = ref(['', '', '', '', '', '']);
+        const connectOtpValue        = ref('');
         const connectOtpBusy         = ref(false);
         const connectOtpError        = ref('');
         const connectPendingToken    = ref('');
@@ -1400,7 +1404,44 @@ createApp({
 
         const focusSearch = () => {
             productSearch.value = '';
-            nextTick(() => searchInput.value?.focus());
+            nextTick(() => focusSearchField());
+        };
+
+        // Android WebView opens the soft keyboard for any editable text field, including the
+        // hidden barcode wedge. Keep that field focused for hardware scanners, but never as an
+        // editable input — readonly + inputmode=none does not raise the IME.
+        const focusSearchField = () => {
+            const el = searchInput.value;
+            if (!el) return;
+            if (window.Capacitor) {
+                const active = document.activeElement;
+                if (active && active !== el && typeof active.blur === 'function') active.blur();
+                el.readOnly = true;
+                el.setAttribute('inputmode', 'none');
+                el.focus({ preventScroll: true });
+                return;
+            }
+            el.focus();
+        };
+
+        const onScannerKeydown = (e) => {
+            if (!e.target?.readOnly) return;
+            if (e.key === 'Enter' || e.key === 'Tab') return;
+            if (e.key === 'Backspace') {
+                e.preventDefault();
+                productSearch.value = productSearch.value.slice(0, -1);
+                onPrimarySearchInput();
+                return;
+            }
+            const ch = e.key.length === 1
+                ? e.key
+                : (e.key === 'Unidentified' && e.keyCode >= 32 && e.keyCode <= 126
+                    ? String.fromCharCode(e.keyCode)
+                    : '');
+            if (!ch || e.ctrlKey || e.metaKey || e.altKey) return;
+            e.preventDefault();
+            productSearch.value += ch;
+            onPrimarySearchInput();
         };
 
         const cancelCameraBarcodeScan = async () => {
@@ -1426,7 +1467,6 @@ createApp({
                     if (productSearch.value) {
                         manualSearchQuery.value = productSearch.value;
                         productSearch.value = '';
-                        showManualSearchModal.value = true;
                     }
                 }
             } catch (_) {
@@ -1436,7 +1476,11 @@ createApp({
         };
 
         const refocusSearch = () => {
-            nextTick(() => searchInput.value?.focus());
+            nextTick(() => {
+                focusSearchField();
+                // Closing the payment sheet can move focus onto an editable field a frame later.
+                if (window.Capacitor) requestAnimationFrame(() => focusSearchField());
+            });
         };
 
         // ════════════════════════════════════════════════════════════════════
@@ -2226,6 +2270,8 @@ createApp({
             if (blockSaleIfPhase2Offline()) return;
             const tx = await buildFinalTransaction([{ method: 'cash', amount: grandTotal.value }]);
             await saveTransaction(tx);
+            showPaymentModal.value = false;
+            mobileCartOpen.value = false;
             toast(t('sale_saved'), 'success');
             printReceipt(lastReceipt.value, { silent: true });
             if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
@@ -2239,6 +2285,8 @@ createApp({
             if (blockSaleIfPhase2Offline()) return;
             const tx = await buildFinalTransaction([{ method: 'card', amount: grandTotal.value }]);
             await saveTransaction(tx);
+            showPaymentModal.value = false;
+            mobileCartOpen.value = false;
             toast(t('sale_saved_card'), 'success');
             printReceipt(lastReceipt.value, { silent: true });
             if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
@@ -2298,13 +2346,48 @@ createApp({
         // ════════════════════════════════════════════════════════════════════
 
         const printReceipt = async (sale, { silent = false } = {}) => {
-            let receipt = getReceiptPayloadForSale(sale)
-                || buildLocalReceiptPayload(
-                    sale, settings.value, locations.value, printers.value,
-                    invoiceLayouts.value, receiptTemplate.value, business.value, receiptTemplateDesign.value,
-                    localPrinterName.value,
-                    localPrinters.value,
+            // Mobile thermal printers (Bluetooth/WiFi/Sunmi) must use the compact local
+            // template. sale.server_receipt is the cloud-rendered A4 invoice (with table
+            // borders and fixed widths) — it renders as narrow stretched columns on 58/80mm
+            // paper. The local template is designed for thermal width. Desktop keeps its
+            // existing preference for server_receipt when available.
+            const isMobileApp = !!window.platformAPI?.isCapacitor?.();
+            // On mobile (Android/Capacitor) we build a self-contained thermal receipt
+            // from scratch and ignore both sale.server_receipt (cloud A4 invoice) and
+            // receiptTemplate.value (the cloud wrapper — also A4 in most tenants).
+            // buildMobileThermalReceiptHtml uses only slim/slim2 item+totals builders,
+            // wraps them in minimal inline CSS, and puts the ZATCA QR at the bottom
+            // in its own centered block. No outer table, no borders.
+            let receipt;
+            if (isMobileApp) {
+                let targetWidthPx = 384;
+                if (selectedPrinterType.value === 'sunmi' && sunmiPrinterAvailable.value) {
+                    targetWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
+                } else if (selectedPrinterType.value === 'bluetooth' || selectedPrinterType.value === 'wifi') {
+                    targetWidthPx = 576;
+                }
+                const mobileHtml = buildMobileThermalReceiptHtml(
+                    sale, settings.value, business.value, locations.value,
+                    invoiceLayouts.value, targetWidthPx,
                 );
+                receipt = {
+                    is_enabled: true,
+                    print_type: 'browser',
+                    print_title: sale.server_invoice_no || sale.invoice_no || 'Receipt',
+                    transaction_id: sale.server_id || null,
+                    html_content: mobileHtml,
+                    use_local_html: true,
+                    thermal_width: targetWidthPx,
+                };
+            } else {
+                receipt = getReceiptPayloadForSale(sale)
+                    || buildLocalReceiptPayload(
+                        sale, settings.value, locations.value, printers.value,
+                        invoiceLayouts.value, receiptTemplate.value, business.value, receiptTemplateDesign.value,
+                        localPrinterName.value,
+                        localPrinters.value,
+                    );
+            }
             if (!receipt) {
                 if (!silent) toast(t('no_invoice_template'), 'error');
                 return false;
@@ -2344,6 +2427,17 @@ createApp({
                         wifi_printer_ip_address: wifiPrinterIp.value,
                         wifi_printer_name: t('m_wifi_printer'),
                     };
+                } else if (selectedPrinterType.value === 'sunmi' && sunmiPrinterAvailable.value) {
+                    const sunmiWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
+                    receipt = {
+                        ...receipt,
+                        print_type: 'sunmi_inner',
+                        thermal_width: sunmiWidthPx,
+                    };
+                } else {
+                    // On Android with no mobile printer configured: block the print and tell the user.
+                    if (!silent) toast(t('m_no_printer_selected') || 'No printer selected. Go to Settings → Printers to choose one.', 'error');
+                    return false;
                 }
             }
 
@@ -2523,6 +2617,7 @@ createApp({
                 selectedPrinterType.value = mobilePrn.data.type || '';
                 selectedBluetoothPrinterInfo.value = mobilePrn.data.bluetooth || null;
                 wifiPrinterIp.value = mobilePrn.data.wifiIp || '';
+                if (mobilePrn.data.sunmiPaperWidthMm) sunmiPaperWidthMm.value = mobilePrn.data.sunmiPaperWidthMm;
                 if (selectedBluetoothPrinterInfo.value && window.zatSetBluetoothPrinter) {
                     window.zatSetBluetoothPrinter(selectedBluetoothPrinterInfo.value);
                 }
@@ -2534,7 +2629,9 @@ createApp({
             sublocation.value = subloc?.data ?? null;
 
             const asRec = await db.settings.get('auto_sync_interval_seconds');
+            const asNextRec = await db.settings.get('auto_sync_next_fire_at');
             if (sublocation.value) {
+                pendingResumeNextFireAt = typeof asNextRec?.data === 'number' ? asNextRec.data : null;
                 autoSyncIntervalSeconds.value = normalizeAutoSyncIntervalSeconds(asRec?.data);
             } else {
                 autoSyncIntervalSeconds.value = null;
@@ -2624,6 +2721,7 @@ createApp({
                     type: selectedPrinterType.value,
                     bluetooth: selectedBluetoothPrinterInfo.value,
                     wifiIp: wifiPrinterIp.value,
+                    sunmiPaperWidthMm: sunmiPaperWidthMm.value,
                 },
             });
         };
@@ -2632,7 +2730,7 @@ createApp({
         const scanBluetoothPrinters = () => {
             isScanningBluetoothPrinters.value = true;
             try {
-                window.ReactNativeWebView?.postMessage?.(JSON.stringify({ action: 'listBluetoothPrinters' }));
+                window.ReactNativeWebView?.postMessage?.(JSON.stringify({ type: 'request_bluetooth_scan' }));
             } catch { /* ignore */ }
             setTimeout(() => { isScanningBluetoothPrinters.value = false; }, 3000);
         };
@@ -2647,6 +2745,12 @@ createApp({
         const saveWifiPrinterIp = async (ip) => {
             wifiPrinterIp.value = (ip || '').trim();
             selectedPrinterType.value = wifiPrinterIp.value ? 'wifi' : (selectedBluetoothPrinterInfo.value ? 'bluetooth' : '');
+            await persistMobilePrinterConfig();
+        };
+
+        const saveSunmiPaperWidth = async (mm) => {
+            const parsed = parseInt(mm);
+            sunmiPaperWidthMm.value = (parsed === 80) ? 80 : 58;
             await persistMobilePrinterConfig();
         };
 
@@ -2946,6 +3050,7 @@ createApp({
 
         const resetConnectForm = () => {
             connectOtpDigits.value    = ['', '', '', '', '', ''];
+            connectOtpValue.value     = '';
             connectOtpError.value     = '';
             connectPendingToken.value = '';
             connectLocations.value    = [];
@@ -2982,7 +3087,7 @@ createApp({
                         ? t('otp_invalid_or_expired')
                         : (data.message || t('otp_redeem_failed'));
                     connectOtpDigits.value = ['', '', '', '', '', ''];
-                    document.getElementById('m-otp-0')?.focus();
+                    connectOtpValue.value = '';
                     return;
                 }
                 const token = String(data.token || '').trim();
@@ -3007,32 +3112,17 @@ createApp({
             }
         };
 
-        const onOtpDigitInput = (index, event) => {
-            // Handle paste of full code into any box
-            const pasted = event.target.value;
-            if (pasted.length > 1) {
-                const digits = pasted.replace(/\D/g, '').slice(0, 6).split('');
-                digits.forEach((d, i) => { connectOtpDigits.value[i] = d; });
-                event.target.value = connectOtpDigits.value[index] || '';
-                const next = Math.min(digits.length, 5);
-                document.getElementById(`m-otp-${next}`)?.focus();
-                if (connectOtpDigits.value.join('').length === 6) redeemConnectOtp();
-                return;
-            }
-            const val = pasted.replace(/\D/g, '').slice(-1);
-            connectOtpDigits.value[index] = val;
+        const onOtpInput = (event) => {
+            const val = event.target.value.replace(/\D/g, '').slice(0, 6);
+            connectOtpValue.value = val;
             event.target.value = val;
-            if (val && index < 5) {
-                document.getElementById(`m-otp-${index + 1}`)?.focus();
-            }
-            if (connectOtpDigits.value.join('').length === 6) redeemConnectOtp();
+            const digits = val.split('');
+            connectOtpDigits.value = Array.from({ length: 6 }, (_, i) => digits[i] || '');
+            if (val.length === 6) redeemConnectOtp();
         };
 
-        const onOtpDigitKeydown = (index, event) => {
-            if (event.key === 'Backspace' && !connectOtpDigits.value[index] && index > 0) {
-                document.getElementById(`m-otp-${index - 1}`)?.focus();
-            }
-        };
+        const onOtpDigitInput = () => {};
+        const onOtpDigitKeydown = () => {};
 
         const saveConnection = async () => {
             if (!connectPendingToken.value) { toast(t('enter_6_digit_otp'), 'error'); return; }
@@ -3526,7 +3616,7 @@ createApp({
                     lot_number:           item.lot_number  || null,
                     lot_expiry:           item.lot_expiry  || null,
                     selected_modifiers:   item.selected_modifiers || [],
-                    combo_variations:     item.combo_variations   || [],
+                    combo:                item.combo_variations   || [],
                     unit_multiplier:      +(item.unit_multiplier   || 1),
                 })),
                 payment_lines: (s.payments || []).map(p => ({
@@ -4112,6 +4202,16 @@ createApp({
                 await refreshCashRegisterPermissions();
                 restartAutoSyncScheduler();
                 toast(t('account_added_switched'), 'success');
+                if (isOnline.value) {
+                    isSyncing.value = true;
+                    try {
+                        await runStructuredPullSync({ quietSuccessToast: true });
+                    } catch (e) {
+                        addLog('Auto-pull after OTP login failed: ' + e.message, 'error');
+                    } finally {
+                        isSyncing.value = false;
+                    }
+                }
             } catch (e) {
                 addAccountOtpError.value = t('otp_redeem_failed');
             } finally {
@@ -4161,6 +4261,8 @@ createApp({
         };
 
         let autoSyncIntervalId = null;
+        let autoSyncTimeoutId = null;
+        let pendingResumeNextFireAt = null;
         let autoSyncUiTimerId = null;
         let autoSyncInFlight = false;
 
@@ -4168,6 +4270,10 @@ createApp({
             if (autoSyncIntervalId != null) {
                 clearInterval(autoSyncIntervalId);
                 autoSyncIntervalId = null;
+            }
+            if (autoSyncTimeoutId != null) {
+                clearTimeout(autoSyncTimeoutId);
+                autoSyncTimeoutId = null;
             }
             autoSyncNextFireAt.value = null;
         };
@@ -4230,14 +4336,37 @@ createApp({
             stopAutoSyncScheduler();
             if (!autoSyncIntervalSeconds.value || !sublocation.value || !hasSyncCredentials()) return;
             const periodMs = autoSyncIntervalSeconds.value * 1000;
-            autoSyncNextFireAt.value = Date.now() + periodMs;
-            autoSyncIntervalId = setInterval(() => {
+            const now = Date.now();
+
+            // On first start after app reopen, resume from persisted fire time (consumed once)
+            const resumeAt = pendingResumeNextFireAt;
+            pendingResumeNextFireAt = null;
+
+            // If a valid future time was saved, honour it; if overdue, fire in 2s; else fresh interval
+            const firstFireAt = (resumeAt != null && resumeAt > now + 2000)
+                ? resumeAt
+                : (resumeAt != null ? now + 2000 : now + periodMs);
+
+            autoSyncNextFireAt.value = firstFireAt;
+            void db.settings.put({ key: 'auto_sync_next_fire_at', data: firstFireAt });
+
+            autoSyncTimeoutId = setTimeout(() => {
+                autoSyncTimeoutId = null;
                 const sec = autoSyncIntervalSeconds.value;
                 if (!sec || !sublocation.value) return;
                 const p = sec * 1000;
                 autoSyncNextFireAt.value = Date.now() + p;
+                void db.settings.put({ key: 'auto_sync_next_fire_at', data: autoSyncNextFireAt.value });
                 void maybeRunAutoSyncCycle();
-            }, periodMs);
+                // Fallback interval in case maybeRunAutoSyncCycle returns early without restarting
+                autoSyncIntervalId = setInterval(() => {
+                    const s2 = autoSyncIntervalSeconds.value;
+                    if (!s2 || !sublocation.value) return;
+                    autoSyncNextFireAt.value = Date.now() + s2 * 1000;
+                    void db.settings.put({ key: 'auto_sync_next_fire_at', data: autoSyncNextFireAt.value });
+                    void maybeRunAutoSyncCycle();
+                }, p);
+            }, firstFireAt - now);
         };
 
         watch([autoSyncIntervalSeconds, sublocation, () => settings.value.serverUrl, () => settings.value.apiKey], () => {
@@ -4458,6 +4587,25 @@ createApp({
             window.addEventListener('zat-android-bluetooth-printers', (e) => {
                 bluetoothPrinters.value = (e.detail && e.detail.devices) || [];
             });
+            // Sunmi inner printer availability (fired by SunmiPrinterManager on service connect/disconnect).
+            window.addEventListener('zat-sunmi-printer-available', (e) => {
+                sunmiPrinterAvailable.value = !!(e.detail && e.detail.available);
+                const model = window.__sunmiPrinterModel || '';
+                if (model) sunmiDetectedModel.value = model;
+                if (sunmiPrinterAvailable.value && !selectedPrinterType.value) {
+                    selectedPrinterType.value = 'sunmi';
+                }
+            });
+            // Seed from flag set before Vue mounted (service connected early).
+            if (window.__sunmiInnerPrinterAvailable) {
+                sunmiPrinterAvailable.value = true;
+                const model = window.__sunmiPrinterModel || '';
+                if (model) sunmiDetectedModel.value = model;
+                if (!selectedPrinterType.value) selectedPrinterType.value = 'sunmi';
+            }
+            // Query the Java side for current status — catches the timing race where
+            // onServiceConnected fired before the page finished loading.
+            window.ReactNativeWebView?.postMessage?.(JSON.stringify({ type: 'check_sunmi_available' }));
 
             await loadSettings();
 
@@ -4684,6 +4832,31 @@ createApp({
             window.addEventListener('offline', () => { isOnline.value = false; toast(t('connection_lost'), 'error'); });
         }
 
+        // ─── Android hardware back button ───
+        if (window.api?.isCapacitor?.()) {
+            try {
+                const { App: CapApp } = window.Capacitor.Plugins;
+                CapApp.addListener('backButton', () => {
+                    // Dismiss deepest layer first, then panels, then pages, then minimize
+                    if (showPaymentModal.value)       { showPaymentModal.value = false; return; }
+                    if (showDiscountModal.value)      { showDiscountModal.value = false; return; }
+                    if (showLineEditModal.value)      { showLineEditModal.value = false; return; }
+                    if (showAddAccountModal.value)    { showAddAccountModal.value = false; return; }
+                    if (showCloseRegisterModal.value) { showCloseRegisterModal.value = false; return; }
+                    if (showOpenRegisterModal.value)  { showOpenRegisterModal.value = false; return; }
+                    if (showHeldSalesModal.value)     { showHeldSalesModal.value = false; return; }
+                    if (showBrandDrawer.value)        { showBrandDrawer.value = false; return; }
+                    if (viewingSale.value)            { viewingSale.value = null; return; }
+                    if (showSyncPanel.value)          { showSyncPanel.value = false; return; }
+                    if (!sideNavCollapsed.value)      { sideNavCollapsed.value = true; return; }
+                    if (currentPage.value !== 'pos')  { currentPage.value = 'pos'; return; }
+                    CapApp.minimizeApp();
+                });
+            } catch (e) {
+                console.warn('Could not register back button handler:', e);
+            }
+        }
+
         // ════════════════════════════════════════════════════════════════════
         // EXPOSE
         // ════════════════════════════════════════════════════════════════════
@@ -4751,9 +4924,9 @@ createApp({
             profileRegistry, cashierDisplayName, activeProfileEntry, currentLocationName, unsyncedForAccountSwitch,
             showAddAccountModal, addAccountTokenInput, preAccountSwitchBusy,
             addAccountOtpInput, addAccountOtpBusy, addAccountOtpError, addAccountFromOtp,
-            showConnectForm, connectServerUrl, connectOtpDigits, connectOtpBusy, connectOtpError,
+            showConnectForm, connectServerUrl, connectOtpDigits, connectOtpValue, connectOtpBusy, connectOtpError,
             connectPendingToken, connectLocations, connectLocationId, connectSaveBusy,
-            openConnectForm, onOtpDigitInput, onOtpDigitKeydown, saveConnection,
+            openConnectForm, onOtpInput, onOtpDigitInput, onOtpDigitKeydown, saveConnection,
             // Computed
             displayProducts, filteredProducts, filteredCustomers, manualSearchResults, mobileSearchResults,
             pricedProducts, recentSalesForTab,
@@ -4767,6 +4940,7 @@ createApp({
             fmt, fmtDate,
             // Methods
             addToCart, updateQty, removeFromCart, clearCart, resetCart, addFirstSearchResult, focusSearch,
+            onScannerKeydown,
             startCameraBarcodeScan, cancelCameraBarcodeScan, scannerActive,
             confirmClearCart,
             onPrimarySearchInput,
@@ -4786,7 +4960,8 @@ createApp({
             // Mobile (Android) UI + printer picker
             mobileCartOpen, mobileProductViewMode,
             bluetoothPrinters, isScanningBluetoothPrinters, selectedBluetoothPrinterInfo,
-            wifiPrinterIp, selectedPrinterType,
+            wifiPrinterIp, selectedPrinterType, sunmiPrinterAvailable,
+            sunmiDetectedModel, sunmiPaperWidthMm, saveSunmiPaperWidth,
             scanBluetoothPrinters, selectBluetoothPrinter, saveWifiPrinterIp,
             // Settings tabs + printer CRUD
             settingsTab, localPrinters, printerPickerOptions,

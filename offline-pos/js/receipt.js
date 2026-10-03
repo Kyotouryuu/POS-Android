@@ -14,7 +14,10 @@ const t = (k, v) => {
 function buildZatcaQrSvg(tlvBase64, design) {
     if (!tlvBase64 || typeof qrcode === 'undefined') return '';
     try {
-        const qr = qrcode(0, 'M');
+        // Error correction 'L' (7%) — ZATCA TLV is small and prints on clean thermal
+        // paper, so we don't need the higher redundancy of 'M'. Lower EC = lower QR
+        // version = fewer, chunkier modules → cleaner scan target at the same size.
+        const qr = qrcode(0, 'L');
         qr.addData(tlvBase64);
         qr.make();
 
@@ -578,4 +581,160 @@ function getReceiptPayloadForSale(sale) {
         return sale.server_receipt;
     }
     return null;
+}
+
+// ─── Self-contained mobile thermal receipt ────────────────────────────────────
+// Bypasses receiptTemplate.value (the cloud-synced A4 wrapper) entirely.
+//
+// Design rules (both 58mm and 80mm):
+//   - Strict 2-column layout: labels on right (Arabic RTL), values on left (LTR)
+//   - NO 3-column table rows, NO middle columns
+//   - Font size ~14-15px on BOTH widths — content wraps to more lines on 58mm
+//     rather than shrinking, so it stays legible without a magnifying glass
+//   - Item = 2 rows: line1 "name | total", line2 (small) "qty × unit_price"
+//   - QR at very bottom in its own centered block
+function buildMobileThermalReceiptHtml(sale, settings, business, locations, invoiceLayouts, thermalWidthPx) {
+    const is58mm = (thermalWidthPx || 384) <= 400;
+    const location = getLocationForSale(sale, locations, settings) || {};
+    const layout = getInvoiceLayoutForSale(sale, locations, invoiceLayouts, settings) || {};
+    const cs = layout.common_settings || {};
+    const hidePrices = !!(typeof cs === 'string' ? JSON.parse(cs || '{}') : cs).hide_price;
+    const biz = business || {};
+    const f = makeFormatter();
+
+    const invoiceNo   = sale.server_invoice_no || sale.invoice_no || '';
+    const invoiceDate = new Date(sale.created_at).toLocaleString('ar-SA', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+    const cashCustomerLabel = t('receipt_cash_customer');
+    const customerName = (sale.customer_name || cashCustomerLabel)
+        .replace('Walk-In Customer', cashCustomerLabel)
+        .replace('Walk In Customer', cashCustomerLabel);
+
+    const bizName = biz.name || '';
+    const bizVat  = biz.tax_number_1 || '';
+    const bizCr   = biz.tax_number_2 || '';
+    const bizCrLabel = biz.tax_label_2 || 'CR';
+    // Suppress the location line when it duplicates the business name (common for
+    // single-location tenants where both fields hold the same string).
+    const rawLocName = location.name || '';
+    const locName = (rawLocName && rawLocName.trim() !== bizName.trim()) ? rawLocName : '';
+    const locAddr = [location.address_line_1, location.city].filter(Boolean).join('، ');
+    const locPhone = location.mobile || location.landline || '';
+
+    // Items: strict 2-column. Row 1 = name (right) + total (left). Row 2 (small) = qty × unit (right).
+    const itemsHtml = (sale.items || []).map((item) => {
+        const unitPrice = item.unit_price_exc_tax ?? item.unit_price;
+        const total     = lineTotal(item);
+        const qty       = fQty(item.quantity);
+        const noteHtml  = item.line_note ? `<div class="item-note">${item.line_note}</div>` : '';
+        const row1 = hidePrices
+            ? `<div class="row"><span class="right name">${item.name}</span></div>`
+            : `<div class="row"><span class="right name">${item.name}</span><span class="left total">${f(total)}</span></div>`;
+        const row2 = hidePrices
+            ? `<div class="row sub"><span class="right sub-text">${qty}</span></div>`
+            : `<div class="row sub"><span class="right sub-text">${qty} × ${f(unitPrice)}</span></div>`;
+        return `<div class="item">${row1}${row2}${noteHtml}</div>`;
+    }).join('');
+
+    // Totals: strict 2-column label/value pairs, no tables.
+    const agg = saleAggregates(sale);
+    const change = Math.max(0, agg.paid - agg.total);
+    // Derive VAT locally: sale.tax is often 0 on offline records even when items have
+    // tax_percent > 0. Use the gap between total (inc-tax) and subtotal (ex-tax) as the
+    // effective VAT amount when the sale-level field is missing.
+    const derivedTax = agg.tax > 0.005 ? agg.tax : Math.max(0, agg.total - agg.subtotal);
+    // Show a single VAT % label when all taxed items share the same rate.
+    const itemTaxPcts = [...new Set((sale.items || []).map(i => Number(i.tax_percent) || 0).filter(p => p > 0))];
+    const vatPctLabel = itemTaxPcts.length === 1 ? ` (${itemTaxPcts[0]}%)` : '';
+    const totalsRows = [];
+    if (!hidePrices) {
+        totalsRows.push(`<div class="row"><span class="right">المجموع قبل الضريبة</span><span class="left">${f(agg.subtotal)}</span></div>`);
+        if (derivedTax > 0.005) {
+            totalsRows.push(`<div class="row"><span class="right">ضريبة القيمة المضافة${vatPctLabel}</span><span class="left">${f(derivedTax)}</span></div>`);
+        }
+        totalsRows.push(`<div class="row grand"><span class="right">الإجمالي شامل الضريبة</span><span class="left">${f(agg.total)}</span></div>`);
+        // Payment breakdown — only shown when it adds info beyond the grand total:
+        //   - Multiple payments (split tender): list each
+        //   - Single payment that doesn't fully cover the total: show it + "paid"
+        //   - Change due: show it
+        // A single full-coverage payment with no change is redundant with the grand
+        // total, so we skip it entirely.
+        const payments = sale.payments || [];
+        const singleFullPayment = payments.length === 1
+            && Math.abs((parseFloat(payments[0].amount) || 0) - agg.total) < 0.005
+            && change < 0.005;
+        if (payments.length > 1 || !singleFullPayment) {
+            payments.forEach((p) => {
+                totalsRows.push(`<div class="row sub"><span class="right sub-text">${arPayMethod(p.method)}</span><span class="left sub-text">${f(p.amount)}</span></div>`);
+            });
+            if (change > 0.005) {
+                totalsRows.push(`<div class="row"><span class="right">الباقي</span><span class="left">${f(change)}</span></div>`);
+            }
+        }
+    }
+    const totalsHtml = totalsRows.join('');
+    const qrHtml = buildZatcaQrSvg(sale.zatca_qr_code || null, 'slim2');
+
+    // Font sizing: SAME baseline for 58mm and 80mm. Matches real thermal receipt
+    // reference — LARGE, BOLD fonts that fill the paper width edge-to-edge and give
+    // the receipt vertical presence. Content wraps to more lines on 58mm rather than
+    // shrinking below readable.
+    const baseFont   = '26px';
+    const smallFont  = '24px';
+    const grandFont  = '32px';
+    const headerFont = '26px';
+    const bodyWidth  = thermalWidthPx + 'px';
+    // QR near-full width, matching the reference — clean, scannable, dominant at bottom.
+    const qrSize     = is58mm ? (thermalWidthPx - 30) + 'px' : (thermalWidthPx - 40) + 'px';
+
+    // CSS scoped to .rcp — createTemporaryPrintableHost extracts body.childNodes into
+    // its own wrapper div, so a bare `body {}` selector never matches. Everything must
+    // be scoped to the wrapping .rcp div.
+    const css = `
+        .rcp,.rcp *{box-sizing:border-box;color:#000;-webkit-text-stroke:0.3px #000}
+        .rcp{width:${bodyWidth};max-width:${bodyWidth};font-family:'Tahoma','Arial',sans-serif;font-size:${baseFont};line-height:1.5;padding:6px;direction:rtl;text-align:right;font-weight:700;background:#fff}
+        .rcp hr{border:none;border-top:2px solid #000;margin:10px 0;display:block;width:100%}
+        .rcp .center{text-align:center}
+        .rcp .small{font-size:${smallFont}}
+        .rcp .header-name{font-size:${headerFont};font-weight:900;text-align:center;margin:6px 0;-webkit-text-stroke:0.6px #000}
+        .rcp .header-line{text-align:center;margin:4px 0;font-size:${baseFont};font-weight:700}
+        .rcp .header-line.small{font-size:${smallFont}}
+        .rcp .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:5px 0;width:100%;direction:rtl}
+        .rcp .row > .right{text-align:right;flex:1;min-width:0;word-break:break-word;font-weight:700}
+        .rcp .row > .left{text-align:left;white-space:nowrap;font-weight:800;direction:ltr}
+        .rcp .row.sub{margin:2px 0 6px}
+        .rcp .row.sub .sub-text{font-size:${smallFont};font-weight:700}
+        .rcp .row.grand{font-size:${grandFont};font-weight:900;margin:10px 0;-webkit-text-stroke:0.7px #000}
+        .rcp .row.grand .left,.rcp .row.grand .right{font-size:${grandFont};font-weight:900}
+        .rcp .item{padding:6px 0;border-bottom:1px dashed #000}
+        .rcp .item:last-child{border-bottom:none}
+        .rcp .item .name{font-weight:800}
+        .rcp .item .total{font-weight:900;font-size:${baseFont}}
+        .rcp .item-note{font-size:${smallFont};margin-top:3px;text-align:right}
+        .rcp .zatca-qr-block{margin:16px 0 6px;text-align:center;width:100%;display:block}
+        .rcp .zatca-qr-block svg{display:block!important;margin:0 auto!important;width:${qrSize}!important;max-width:${qrSize}!important;height:${qrSize}!important}
+        .rcp .zatca-qr-block p{font-size:${smallFont}!important;font-weight:700!important;color:#000!important;margin-top:6px!important}
+    `.replace(/\s+/g, ' ');
+
+    const body = `<div class="rcp" dir="rtl">`
+        + (bizName  ? `<div class="header-name">${bizName}</div>` : '')
+        + (locName  ? `<div class="header-line">${locName}</div>` : '')
+        + (locAddr  ? `<div class="header-line small">${locAddr}</div>` : '')
+        + (locPhone ? `<div class="header-line small" dir="ltr">${locPhone}</div>` : '')
+        + (bizVat   ? `<div class="header-line">الرقم الضريبي: <span dir="ltr">${bizVat}</span></div>` : '')
+        + (bizCr    ? `<div class="header-line">السجل التجاري: <span dir="ltr">${bizCr}</span></div>` : '')
+        + `<hr>`
+        + (invoiceNo    ? `<div class="row"><span class="right">رقم الفاتورة</span><span class="left">${invoiceNo}</span></div>` : '')
+        + (invoiceDate  ? `<div class="row"><span class="right">التاريخ</span><span class="left">${invoiceDate}</span></div>` : '')
+        + (customerName ? `<div class="row"><span class="right">العميل</span><span class="left" style="white-space:normal;direction:rtl;">${customerName}</span></div>` : '')
+        + `<hr>`
+        + itemsHtml
+        + `<hr>`
+        + totalsHtml
+        + (qrHtml ? `<hr><div class="zatca-qr-block">${qrHtml}</div>` : '')
+        + `</div>`;
+
+    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>${css}</style></head><body>${body}</body></html>`;
 }
