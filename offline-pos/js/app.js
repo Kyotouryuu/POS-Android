@@ -56,6 +56,7 @@ createApp({
         const wifiPrinterIp              = ref('');
         const selectedPrinterType        = ref('');        // '' | 'bluetooth' | 'wifi' | 'sunmi'
         const sunmiPrinterAvailable      = ref(false);
+        const sunmiDetectedModel         = ref('');        // model string injected by SunmiPrinterManager (e.g. 'V2', 'V3 Pro')
         const sunmiPaperWidthMm          = ref(58);       // 58 | 80 — matches paper roll installed
 
         // ── Settings tabs & printer CRUD ─────────────────────────────────────
@@ -4565,6 +4566,8 @@ createApp({
             // Sunmi inner printer availability (fired by SunmiPrinterManager on service connect/disconnect).
             window.addEventListener('zat-sunmi-printer-available', (e) => {
                 sunmiPrinterAvailable.value = !!(e.detail && e.detail.available);
+                const model = window.__sunmiPrinterModel || '';
+                if (model) sunmiDetectedModel.value = model;
                 if (sunmiPrinterAvailable.value && !selectedPrinterType.value) {
                     selectedPrinterType.value = 'sunmi';
                 }
@@ -4572,6 +4575,8 @@ createApp({
             // Seed from flag set before Vue mounted (service connected early).
             if (window.__sunmiInnerPrinterAvailable) {
                 sunmiPrinterAvailable.value = true;
+                const model = window.__sunmiPrinterModel || '';
+                if (model) sunmiDetectedModel.value = model;
                 if (!selectedPrinterType.value) selectedPrinterType.value = 'sunmi';
             }
             // Query the Java side for current status — catches the timing race where
@@ -4932,7 +4937,7 @@ createApp({
             mobileCartOpen, mobileProductViewMode,
             bluetoothPrinters, isScanningBluetoothPrinters, selectedBluetoothPrinterInfo,
             wifiPrinterIp, selectedPrinterType, sunmiPrinterAvailable,
-            sunmiPaperWidthMm, saveSunmiPaperWidth,
+            sunmiDetectedModel, sunmiPaperWidthMm, saveSunmiPaperWidth,
             scanBluetoothPrinters, selectBluetoothPrinter, saveWifiPrinterIp,
             // Settings tabs + printer CRUD
             settingsTab, localPrinters, printerPickerOptions,

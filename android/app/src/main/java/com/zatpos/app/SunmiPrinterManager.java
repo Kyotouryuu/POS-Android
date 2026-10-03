@@ -104,7 +104,7 @@ public class SunmiPrinterManager {
                         sendPrintResult(requestId, false, "Failed to decode PNG for Sunmi printing");
                         return;
                     }
-                    // Sunmi V2 firmwares silently no-op printBitmap when given RGB_565 —
+                    // Sunmi V2/V3 firmwares silently no-op printBitmap when given RGB_565 —
                     // onRunResult fires true but no ink hits paper. Force ARGB_8888.
                     Bitmap argb = bitmap.getConfig() == Bitmap.Config.ARGB_8888
                         ? bitmap
