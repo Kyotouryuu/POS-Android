@@ -7,7 +7,9 @@
       "Bash(git commit *)",
       "Bash(xargs grep *)",
       "Bash(.\\\\gradlew.bat assembleDebug)",
-      "Bash(jar tf *)"
+      "Bash(jar tf *)",
+      "Bash(rm main.js preload.js)",
+      "Bash(rm -rf icons/ img/ scripts/ docs/)"
     ]
   }
 }
