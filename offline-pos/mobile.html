@@ -282,9 +282,10 @@
                 <div class="flex items-center gap-2 ps-3 pe-2 py-2 flex-1 min-w-0">
                     <div class="relative flex-1 min-w-0">
                         <i class="fas fa-magnifying-glass absolute start-3 top-1/2 -translate-y-1/2 text-slate-400 text-xs pointer-events-none"></i>
-                        <input type="text" v-model="manualSearchQuery" :placeholder="t('m_search_short')"
+                        <input type="text" v-model="productSearch" :placeholder="t('m_search_short')"
+                            @input="onPrimarySearchInput" @keydown.enter="addFirstSearchResult"
                             class="w-full ps-8 pe-7 h-8 text-sm text-slate-700 bg-slate-100 rounded-full focus:outline-none focus:ring-2 focus:ring-amber-400/50">
-                        <button v-if="manualSearchQuery" @click="manualSearchQuery = ''"
+                        <button v-if="productSearch" @click="productSearch = ''"
                             class="absolute end-2 top-1/2 -translate-y-1/2 w-4 h-4 flex items-center justify-center text-slate-400 active:text-slate-600">
                             <i class="fas fa-xmark text-[9px]"></i>
                         </button>
@@ -362,13 +363,13 @@
             <span class="text-white/40 text-[10px] flex items-center gap-1">{{ t('payment_title') }} <i class="fas fa-chevron-right text-[8px]"></i></span>
         </button>
 
-        <!-- Search results (shown when query is active) -->
-        <div v-if="manualSearchQuery" class="flex-1 overflow-y-auto scrollbar-thin">
-            <div v-if="manualSearchResults.length === 0" class="py-20 text-center text-slate-400 text-sm">
+        <!-- Search results (shown when query is active) — honors the category/brand chips above -->
+        <div v-if="productSearch" class="flex-1 overflow-y-auto scrollbar-thin">
+            <div v-if="mobileSearchResults.length === 0" class="py-20 text-center text-slate-400 text-sm">
                 <i class="fas fa-box-open text-4xl text-slate-300 block mb-3"></i>{{ t('no_matching_products') }}
             </div>
             <div v-else class="flex flex-col gap-1.5 p-2" style="padding-bottom: 96px;">
-                <div v-for="p in manualSearchResults" :key="p.id" @click="addToCartManual(p)"
+                <div v-for="p in mobileSearchResults" :key="p.id" @click="addToCart(p)"
                     class="m-product-row relative bg-white rounded-xl cursor-pointer px-3 py-2 flex items-center gap-3"
                     style="box-shadow:0 1px 3px rgba(12,26,46,.07), 0 1px 2px rgba(12,26,46,.04);">
                     <div class="w-10 h-10 rounded-lg overflow-hidden bg-slate-50 flex items-center justify-center flex-shrink-0">
@@ -391,7 +392,7 @@
                 </div>
             </div>
             <div class="px-4 py-2.5 border-t border-slate-100 flex-shrink-0 text-xs text-slate-400 text-center" style="padding-bottom: max(10px, env(safe-area-inset-bottom));">
-                {{ t('results_count', { count: manualSearchResults.length }) }}
+                {{ t('results_count', { count: mobileSearchResults.length }) }}
             </div>
         </div>
 
