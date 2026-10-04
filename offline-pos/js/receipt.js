@@ -738,3 +738,92 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
 
     return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>${css}</style></head><body>${body}</body></html>`;
 }
+
+// ─── Close-register Z-report receipt ─────────────────────────────────────────
+// Same .rcp design as the sale receipt: strict 2-column RTL rows, identical font
+// sizes, no tables — designed for 58mm / 80mm thermal paper.
+function buildCloseRegisterReceiptHtml(snapshot, form, business, thermalWidthPx) {
+    const reg  = snapshot?.register || {};
+    const summ = reg.summary || {};
+    const biz  = business || {};
+    const f    = makeFormatter();
+
+    const fmtHijri = (d) => d
+        ? new Date(d).toLocaleString('ar-SA-u-ca-islamic-umalqura', {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', hour12: false,
+          })
+        : '';
+
+    const bizName = biz.name || '';
+    const bizVat  = biz.tax_number_1 || '';
+    const bizCr   = biz.tax_number_2 || '';
+
+    const openTime  = fmtHijri(reg.open_time);
+    const closeTime = fmtHijri(new Date());
+
+    const rows = [];
+    const row  = (label, value) =>
+        `<div class="row"><span class="right">${label}</span><span class="left">${value}</span></div>`;
+
+    if (openTime)  rows.push(row('وقت الفتح',   openTime));
+    if (closeTime) rows.push(row('وقت الإغلاق', closeTime));
+
+    rows.push('<hr>');
+
+    rows.push(row('إجمالي المبيعات', f(summ.total_sale  || 0)));
+    rows.push(row('النقد',           f(summ.total_cash  || 0)));
+    rows.push(row('البطاقات',        f(summ.total_card  || 0)));
+    if (+summ.total_bank_transfer > 0)
+        rows.push(row('تحويل بنكي', f(summ.total_bank_transfer)));
+    if (+summ.total_refund > 0)
+        rows.push(row('المرتجعات', f(summ.total_refund)));
+    if (+summ.total_expense > 0)
+        rows.push(row('المصاريف', f(summ.total_expense)));
+
+    rows.push('<hr>');
+    rows.push(row('رصيد أول المدة',  f(summ.cash_in_hand   || 0)));
+    rows.push(`<div class="row grand"><span class="right">المبلغ الختامي</span><span class="left">${f(+(form?.closing_amount || 0))}</span></div>`);
+
+    const slips   = +(form?.total_card_slips || 0);
+    const cheques = +(form?.total_cheques    || 0);
+    if (slips   > 0) rows.push(row('سلبيات البطاقة', String(slips)));
+    if (cheques > 0) rows.push(row('الشيكات',        String(cheques)));
+
+    const note = (form?.closing_note || '').trim();
+    if (note) {
+        rows.push('<hr>');
+        rows.push(`<div class="row"><span class="right">ملاحظة</span><span class="left" style="white-space:normal;direction:rtl;">${note}</span></div>`);
+    }
+
+    const bodyWidth = (thermalWidthPx || 384) + 'px';
+    const baseFont  = '26px';
+    const smallFont = '24px';
+    const grandFont = '32px';
+
+    const css = `
+        .rcp,.rcp *{box-sizing:border-box;color:#000;-webkit-text-stroke:0.3px #000}
+        .rcp{width:${bodyWidth};max-width:${bodyWidth};font-family:'Tahoma','Arial',sans-serif;font-size:${baseFont};line-height:1.5;padding:6px;direction:rtl;text-align:right;font-weight:700;background:#fff}
+        .rcp hr{border:none;border-top:2px solid #000;margin:10px 0;display:block;width:100%}
+        .rcp .header-name{font-size:${baseFont};font-weight:900;text-align:center;margin:6px 0;-webkit-text-stroke:0.6px #000}
+        .rcp .header-line{text-align:center;margin:4px 0;font-size:${smallFont};font-weight:700}
+        .rcp .title{text-align:center;font-size:${baseFont};font-weight:900;margin:8px 0;-webkit-text-stroke:0.5px #000}
+        .rcp .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:5px 0;width:100%;direction:rtl}
+        .rcp .row > .right{text-align:right;flex:1;min-width:0;word-break:break-word;font-weight:700}
+        .rcp .row > .left{text-align:left;white-space:nowrap;font-weight:800;direction:ltr}
+        .rcp .row.grand{font-size:${grandFont};font-weight:900;margin:10px 0;-webkit-text-stroke:0.7px #000}
+        .rcp .row.grand .left,.rcp .row.grand .right{font-size:${grandFont};font-weight:900}
+    `.replace(/\s+/g, ' ');
+
+    const body = `<div class="rcp" dir="rtl">`
+        + (bizName ? `<div class="header-name">${bizName}</div>` : '')
+        + (bizVat  ? `<div class="header-line">الرقم الضريبي: <span dir="ltr">${bizVat}</span></div>` : '')
+        + (bizCr   ? `<div class="header-line">السجل التجاري: <span dir="ltr">${bizCr}</span></div>` : '')
+        + `<hr>`
+        + `<div class="title">تقرير إغلاق الكاشير</div>`
+        + `<hr>`
+        + rows.join('')
+        + `</div>`;
+
+    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>${css}</style></head><body>${body}</body></html>`;
+}

@@ -733,10 +733,36 @@ createApp({
             return true;
         };
 
+        // navigator.onLine only reflects the network adapter, not actual internet
+        // connectivity. For phase 2 we probe the server directly so a WiFi-connected
+        // but internet-less device is correctly treated as offline.
+        const probeServerReachable = async () => {
+            if (!settings.value.serverUrl) return false;
+            try {
+                const ctrl = new AbortController();
+                const tid = setTimeout(() => ctrl.abort(), 5000);
+                await fetch(`${settings.value.serverUrl}/api/sync/config`, {
+                    method: 'HEAD',
+                    headers: apiHeaders(),
+                    signal: ctrl.signal,
+                });
+                clearTimeout(tid);
+                return true;
+            } catch {
+                return false;
+            }
+        };
+
         // Phase 2 ZATCA businesses must be online to place or return orders.
-        const blockSaleIfPhase2Offline = () => {
+        const blockSaleIfPhase2Offline = async () => {
             if ((sublocation.value?.zatca_phase ?? 1) !== 2) return false;
-            if (isOnline.value) return false;
+            if (!isOnline.value) {
+                toast(t('phase2_requires_online'), 'error', 6000);
+                return true;
+            }
+            const reachable = await probeServerReachable();
+            if (reachable) return false;
+            isOnline.value = false;
             toast(t('phase2_requires_online'), 'error', 6000);
             return true;
         };
@@ -2267,7 +2293,7 @@ createApp({
             if (!cart.value.length) return;
             if (!settings.value.locationId) { toast(t('select_location_first_error'), 'error'); return; }
             if (blockSaleIfRegisterClosed()) return;
-            if (blockSaleIfPhase2Offline()) return;
+            if (await blockSaleIfPhase2Offline()) return;
             const tx = await buildFinalTransaction([{ method: 'cash', amount: grandTotal.value }]);
             await saveTransaction(tx);
             showPaymentModal.value = false;
@@ -2282,7 +2308,7 @@ createApp({
             if (!cart.value.length) return;
             if (!settings.value.locationId) { toast(t('select_location_first_error'), 'error'); return; }
             if (blockSaleIfRegisterClosed()) return;
-            if (blockSaleIfPhase2Offline()) return;
+            if (await blockSaleIfPhase2Offline()) return;
             const tx = await buildFinalTransaction([{ method: 'card', amount: grandTotal.value }]);
             await saveTransaction(tx);
             showPaymentModal.value = false;
@@ -2297,7 +2323,7 @@ createApp({
             if (!cart.value.length) return;
             if (!settings.value.locationId) { toast(t('select_location_first_error'), 'error'); return; }
             if (blockSaleIfRegisterClosed()) return;
-            if (blockSaleIfPhase2Offline()) return;
+            if (await blockSaleIfPhase2Offline()) return;
             const tx = await buildFinalTransaction([]);
             tx.payment_status = 'due';
             await saveTransaction(tx);
@@ -2312,7 +2338,7 @@ createApp({
         const saveSale = async (status) => {
             if (!cart.value.length) return;
             if (!settings.value.locationId) { toast(t('select_location_first_error'), 'error'); return; }
-            if (blockSaleIfPhase2Offline()) return;
+            if (await blockSaleIfPhase2Offline()) return;
             saleStatus.value = status;
             const tx = await buildTransaction([]);
             tx.payment_status = 'due';
@@ -2332,7 +2358,7 @@ createApp({
                 openOpenRegisterFlow({ silentIfBusy: true, force: true });
                 return;
             }
-            if (blockSaleIfPhase2Offline()) return;
+            if (await blockSaleIfPhase2Offline()) return;
             const tx = await buildFinalTransaction(payments.value);
             await saveTransaction(tx);
             showPaymentModal.value = false;
@@ -2504,7 +2530,7 @@ createApp({
         const saveReturn = async () => {
             const items = returnItems.value.filter(i => (parseFloat(i.return_qty) || 0) > 0);
             if (!items.length) { toast(t('select_return_qty'), 'error'); return; }
-            if (blockSaleIfPhase2Offline()) return;
+            if (await blockSaleIfPhase2Offline()) return;
             const sale  = returningFromSale.value;
             const total = returnTotal.value;
             const rec = {
@@ -4561,16 +4587,50 @@ createApp({
                     return;
                 }
                 toast(data?.message || t('register_closed'), 'success');
+                const _snapForPrint = closeRegisterSnapshot.value;
+                const _formForPrint = { ...closeRegisterForm.value };
                 hasOpenRegister.value = false;
                 openRegisterAutoDismissed.value = false;
                 showCloseRegisterModal.value = false;
                 resetCart();
                 await loadSales();
+                printCloseRegisterReceipt(_snapForPrint, _formForPrint);
             } catch (e) {
                 closeRegisterStep.value = 'error';
                 closeRegisterMessage.value = e.message || String(e);
             } finally {
                 closeRegisterFlowBusy.value = false;
+            }
+        };
+
+        const printCloseRegisterReceipt = async (snapshot, form) => {
+            let targetWidthPx = 384;
+            if (selectedPrinterType.value === 'sunmi' && sunmiPrinterAvailable.value) {
+                targetWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
+            }
+            const html = buildCloseRegisterReceiptHtml(snapshot, form, business.value, targetWidthPx);
+            let receipt = {
+                is_enabled: true,
+                print_type: 'browser',
+                print_title: 'تقرير إغلاق الكاشير',
+                html_content: html,
+                use_local_html: true,
+                thermal_width: targetWidthPx,
+            };
+            if (window.platformAPI?.isCapacitor?.()) {
+                if (selectedPrinterType.value === 'bluetooth' && selectedBluetoothPrinterInfo.value?.address) {
+                    receipt = { ...receipt, print_type: 'bluetooth_android', bluetooth_printer_address: selectedBluetoothPrinterInfo.value.address, bluetooth_printer_name: selectedBluetoothPrinterInfo.value.name || '' };
+                } else if (selectedPrinterType.value === 'wifi' && wifiPrinterIp.value) {
+                    receipt = { ...receipt, print_type: 'wifi_android', wifi_printer_ip_address: wifiPrinterIp.value, wifi_printer_name: t('m_wifi_printer') };
+                } else if (selectedPrinterType.value === 'sunmi' && sunmiPrinterAvailable.value) {
+                    receipt = { ...receipt, print_type: 'sunmi_inner', thermal_width: targetWidthPx };
+                } else {
+                    return;
+                }
+            }
+            primePrinterSelection(receipt);
+            if (window.zatReceiptPrintRouter && typeof window.zatReceiptPrintRouter.print === 'function') {
+                try { await window.zatReceiptPrintRouter.print(receipt); } catch (e) { /* silent */ }
             }
         };
 
