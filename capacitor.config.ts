@@ -2,7 +2,7 @@ import { CapacitorConfig } from '@capacitor/cli';
 
 const config: CapacitorConfig = {
   appId: 'com.zatpos.app',
-  appName: 'ZAT POS',
+  appName: 'pos-v1',
   webDir: 'offline-pos',
   server: {
     androidScheme: 'https',

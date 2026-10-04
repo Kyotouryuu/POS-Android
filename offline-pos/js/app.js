@@ -383,7 +383,7 @@ createApp({
 
         /** Display-only; fixed ﷼ (ZATCA uses business currency code in zatca.js) */
         const fmt = (n) => `${(+(n || 0)).toFixed(2)} ${CURRENCY_SYMBOL}`;
-        const fmtDate = (d) => d ? new Date(d).toLocaleString() : '';
+        const fmtDate = (d) => d ? new Date(d).toLocaleString('ar-SA-u-ca-islamic-umalqura') : '';
 
         // ── ZATCA QR: render into view-sale modal when opened ────────────────
         watch(viewingSale, async (sale) => {
@@ -2363,8 +2363,6 @@ createApp({
                 let targetWidthPx = 384;
                 if (selectedPrinterType.value === 'sunmi' && sunmiPrinterAvailable.value) {
                     targetWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
-                } else if (selectedPrinterType.value === 'bluetooth' || selectedPrinterType.value === 'wifi') {
-                    targetWidthPx = 576;
                 }
                 const mobileHtml = buildMobileThermalReceiptHtml(
                     sale, settings.value, business.value, locations.value,
@@ -2490,7 +2488,7 @@ createApp({
 
         const openReturnModal = (sale) => {
             returningFromSale.value = sale;
-            returnItems.value       = (sale.items || []).map(i => ({ ...i, return_qty: 0 }));
+            returnItems.value       = (sale.items || []).map(i => ({ ...i, return_qty: '' }));
             // Bug 9 fix: default refund method to the original payment method
             returnMethod.value      = sale.payments?.[0]?.method || 'cash';
             showReturnModal.value   = true;
@@ -2521,6 +2519,18 @@ createApp({
                 created_at:                 new Date().toISOString(),
             };
             await db.transactions.add(cloneForIdb(rec));
+            // Reduce original sale item quantities by the returned amounts
+            const originalSale = returningFromSale.value;
+            if (originalSale?.id) {
+                const returnedMap = new Map(items.map(i => [i.product_id ?? i.name, parseFloat(i.return_qty) || 0]));
+                const updatedItems = (originalSale.items || []).map(origItem => {
+                    const key = origItem.product_id ?? origItem.name;
+                    const returnedQty = returnedMap.get(key) || 0;
+                    if (!returnedQty) return origItem;
+                    return { ...origItem, quantity: Math.max(0, (parseFloat(origItem.quantity) || 0) - returnedQty) };
+                });
+                await db.transactions.update(originalSale.id, { items: updatedItems });
+            }
             await loadSales();
             showReturnModal.value   = false;
             returningFromSale.value = null;
@@ -4596,18 +4606,20 @@ createApp({
                     selectedPrinterType.value = 'sunmi';
                 }
             });
+            // Query the Java side for current status — catches the timing race where
+            // onServiceConnected fired before the page finished loading.
+            window.ReactNativeWebView?.postMessage?.(JSON.stringify({ type: 'check_sunmi_available' }));
+
+            await loadSettings();
+
             // Seed from flag set before Vue mounted (service connected early).
+            // Must run AFTER loadSettings() so it isn't overwritten by the saved printer type.
             if (window.__sunmiInnerPrinterAvailable) {
                 sunmiPrinterAvailable.value = true;
                 const model = window.__sunmiPrinterModel || '';
                 if (model) sunmiDetectedModel.value = model;
                 if (!selectedPrinterType.value) selectedPrinterType.value = 'sunmi';
             }
-            // Query the Java side for current status — catches the timing race where
-            // onServiceConnected fired before the page finished loading.
-            window.ReactNativeWebView?.postMessage?.(JSON.stringify({ type: 'check_sunmi_available' }));
-
-            await loadSettings();
 
             // ─── Initialize app version from platform API ───────────────
             appVersion.value = await window.api.getAppVersion();

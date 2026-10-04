@@ -625,7 +625,7 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
 
     // Items: strict 2-column. Row 1 = name (right) + total (left). Row 2 (small) = qty × unit (right).
     const itemsHtml = (sale.items || []).map((item) => {
-        const unitPrice = item.unit_price_exc_tax ?? item.unit_price;
+        const unitPrice = parseFloat(item.unit_price) || 0;
         const total     = lineTotal(item);
         const qty       = fQty(item.quantity);
         const noteHtml  = item.line_note ? `<div class="item-note">${item.line_note}</div>` : '';
@@ -713,7 +713,7 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
         .rcp .item .name{font-weight:800}
         .rcp .item .total{font-weight:900;font-size:${baseFont}}
         .rcp .item-note{font-size:${smallFont};margin-top:3px;text-align:right}
-        .rcp .zatca-qr-block{margin:16px 0 6px;text-align:center;width:100%;display:block}
+        .rcp .zatca-qr-block{margin:75px 0 6px;text-align:center;width:100%;display:block}
         .rcp .zatca-qr-block svg{display:block!important;margin:0 auto!important;width:${qrSize}!important;max-width:${qrSize}!important;height:${qrSize}!important}
         .rcp .zatca-qr-block p{font-size:${smallFont}!important;font-weight:700!important;color:#000!important;margin-top:6px!important}
     `.replace(/\s+/g, ' ');

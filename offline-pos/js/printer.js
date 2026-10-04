@@ -6,7 +6,7 @@ const ANDROID_USB_PRINTERS_EVENT_NAME = 'zat-android-usb-printers';
 const ANDROID_APP_BLUETOOTH_DEVICES_EVENT = 'zat-android-bluetooth-devices';
 const ANDROID_APP_USB_DEVICES_EVENT = 'zat-android-usb-devices';
 const HTML2CANVAS_CDN_URL = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-const BLUETOOTH_THERMAL_WIDTH = 576;
+const BLUETOOTH_THERMAL_WIDTH = 384; // 58mm default
 const SUNMI_THERMAL_WIDTH = 384; // 58mm paper at 203dpi — fallback; actual width driven by sunmiPaperWidthMm (58=384px, 80=576px)
 const BLUETOOTH_CAPTURE_WORKSPACE_WIDTH = 320;
 let androidBluetoothPrintersCache = [];
