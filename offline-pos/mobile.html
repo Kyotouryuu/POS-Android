@@ -1643,8 +1643,11 @@
                     <option value="other">{{ t('method_other') }}</option>
                 </select>
             </div>
-            <button @click="saveReturn" :disabled="returnTotal <= 0"
-                class="w-full py-3 bg-violet-600 text-white rounded-xl text-sm font-bold disabled:opacity-40">{{ t('confirm_return') }}</button>
+            <button @click="saveReturn" :disabled="returnTotal <= 0 || returnSaving"
+                class="w-full py-3 bg-violet-600 text-white rounded-xl text-sm font-bold disabled:opacity-40 flex items-center justify-center gap-2">
+                <i v-if="returnSaving" class="fas fa-spinner fa-spin"></i>
+                <span>{{ t('confirm_return') }}</span>
+            </button>
         </div>
     </div>
 

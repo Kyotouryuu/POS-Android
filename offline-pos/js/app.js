@@ -219,6 +219,7 @@ createApp({
         const returningFromSale = ref(null);
         const returnItems       = ref([]);
         const returnMethod      = ref('cash'); // Bug 9: tracks refund method
+        const returnSaving      = ref(false);
 
         // ── Payment ──────────────────────────────────────────────────────────
         const payments          = ref([{ method: 'cash', amount: 0 }]);
@@ -2528,41 +2529,49 @@ createApp({
         };
 
         const saveReturn = async () => {
+            if (returnSaving.value) return;
             const items = returnItems.value.filter(i => (parseFloat(i.return_qty) || 0) > 0);
             if (!items.length) { toast(t('select_return_qty'), 'error'); return; }
             if (await blockSaleIfPhase2Offline()) return;
-            const sale  = returningFromSale.value;
-            const total = returnTotal.value;
-            const rec = {
-                type:                       'sell_return',
-                return_parent_invoice_no:   sale.server_invoice_no || sale.invoice_no,
-                local_uuid:                 crypto.randomUUID(),
-                location_id:                sale.location_id || settings.value.locationId,
-                items:                      items.map(i => ({ ...i, quantity: parseFloat(i.return_qty) || 0 })),
-                total,
-                payments:                   [{ method: returnMethod.value, amount: total, is_return: true }],
-                sync_status:                'pending',
-                created_at:                 new Date().toISOString(),
-            };
-            await db.transactions.add(cloneForIdb(rec));
-            // Reduce original sale item quantities by the returned amounts
-            const originalSale = returningFromSale.value;
-            if (originalSale?.id) {
-                const returnedMap = new Map(items.map(i => [i.product_id ?? i.name, parseFloat(i.return_qty) || 0]));
-                const updatedItems = (originalSale.items || []).map(origItem => {
-                    const key = origItem.product_id ?? origItem.name;
-                    const returnedQty = returnedMap.get(key) || 0;
-                    if (!returnedQty) return origItem;
-                    return { ...origItem, quantity: Math.max(0, (parseFloat(origItem.quantity) || 0) - returnedQty) };
-                });
-                await db.transactions.update(originalSale.id, { items: updatedItems });
+            returnSaving.value = true;
+            try {
+                const sale  = returningFromSale.value;
+                const total = returnTotal.value;
+                const rec = {
+                    type:                       'sell_return',
+                    return_parent_invoice_no:   sale.server_invoice_no || sale.invoice_no,
+                    local_uuid:                 crypto.randomUUID(),
+                    location_id:                sale.location_id || settings.value.locationId,
+                    items:                      items.map(i => ({ ...i, quantity: parseFloat(i.return_qty) || 0 })),
+                    total,
+                    payments:                   [{ method: returnMethod.value, amount: total, is_return: true }],
+                    sync_status:                'pending',
+                    created_at:                 new Date().toISOString(),
+                };
+                await db.transactions.add(cloneForIdb(rec));
+                // Reduce original sale item quantities by the returned amounts
+                const originalSale = returningFromSale.value;
+                if (originalSale?.id) {
+                    const returnedMap = new Map(items.map(i => [i.product_id ?? i.name, parseFloat(i.return_qty) || 0]));
+                    const updatedItems = (originalSale.items || []).map(origItem => {
+                        const key = origItem.product_id ?? origItem.name;
+                        const returnedQty = returnedMap.get(key) || 0;
+                        if (!returnedQty) return origItem;
+                        return { ...origItem, quantity: Math.max(0, (parseFloat(origItem.quantity) || 0) - returnedQty) };
+                    });
+                    await db.transactions.update(originalSale.id, { items: updatedItems });
+                }
+                await loadSales();
+                showReturnModal.value   = false;
+                returningFromSale.value = null;
+                returnItems.value       = [];
+                toast(t('return_saved'), 'success');
+                if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
+            } catch (e) {
+                toast(e?.message || t('error_saving_return'), 'error');
+            } finally {
+                returnSaving.value = false;
             }
-            await loadSales();
-            showReturnModal.value   = false;
-            returningFromSale.value = null;
-            returnItems.value       = [];
-            toast(t('return_saved'), 'success');
-            if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
         };
 
         // ════════════════════════════════════════════════════════════════════
@@ -4978,7 +4987,7 @@ createApp({
             showLotModal, pendingProductForLot, selectedLot,
             showAddCustomerModal, newCustomerForm, newCustomerFieldErrors,
             // Returns
-            showReturnModal, returningFromSale, returnItems, returnTotal, returnMethod,
+            showReturnModal, returningFromSale, returnItems, returnTotal, returnMethod, returnSaving,
             // Payment
             payments, paymentMethods, changeReturnMethod,
             // Sales filters
