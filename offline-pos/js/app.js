@@ -356,6 +356,7 @@ createApp({
         const preAccountSwitchBusy = ref(false);
 
         // Mobile connect form
+        const showInitialSyncModal   = ref(false);
         const showConnectForm        = ref(false);
         const connectServerUrl       = ref('https://zaterp.com');
         const connectOtpDigits       = ref(['', '', '', '', '', '']);
@@ -3180,6 +3181,17 @@ createApp({
                 await saveSettings();
                 showConnectForm.value = false;
                 resetConnectForm();
+                if (isOnline.value) {
+                    showInitialSyncModal.value = true;
+                    isSyncing.value = true;
+                    try {
+                        await runStructuredPullSync({ quietSuccessToast: true });
+                    } catch (e) {
+                        addLog('Initial data pull after OTP login failed: ' + e.message, 'error');
+                    } finally {
+                        isSyncing.value = false;
+                    }
+                }
             } finally {
                 connectSaveBusy.value = false;
             }
@@ -5005,6 +5017,7 @@ createApp({
             profileRegistry, cashierDisplayName, activeProfileEntry, currentLocationName, unsyncedForAccountSwitch,
             showAddAccountModal, addAccountTokenInput, preAccountSwitchBusy,
             addAccountOtpInput, addAccountOtpBusy, addAccountOtpError, addAccountFromOtp,
+            showInitialSyncModal,
             showConnectForm, connectServerUrl, connectOtpDigits, connectOtpValue, connectOtpBusy, connectOtpError,
             connectPendingToken, connectLocations, connectLocationId, connectSaveBusy,
             openConnectForm, onOtpInput, onOtpDigitInput, onOtpDigitKeydown, saveConnection,
