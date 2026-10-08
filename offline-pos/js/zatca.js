@@ -341,6 +341,16 @@ function buildSimplifiedInvoiceXml(sale, business, location, icv, pih) {
     </cac:InvoiceLine>`;
     }).join('\n');
 
+    const isReturn      = sale.type === 'sell_return';
+    const invoiceType   = isReturn ? '381' : '388';
+    const billingRef    = isReturn && sale.return_parent_invoice_no
+        ? `    <cac:BillingReference>
+        <cac:InvoiceDocumentReference>
+            <cbc:ID>${escXml(sale.return_parent_invoice_no)}</cbc:ID>
+        </cac:InvoiceDocumentReference>
+    </cac:BillingReference>`
+        : '';
+
     return `<?xml version="1.0" encoding="UTF-8"?>
 <Invoice xmlns="urn:oasis:names:specification:ubl:schema:xsd:Invoice-2"
     xmlns:cac="urn:oasis:names:specification:ubl:schema:xsd:CommonAggregateComponents-2"
@@ -350,7 +360,7 @@ function buildSimplifiedInvoiceXml(sale, business, location, icv, pih) {
     <cbc:UUID>${escXml(sale.local_uuid)}</cbc:UUID>
     <cbc:IssueDate>${issueDate}</cbc:IssueDate>
     <cbc:IssueTime>${issueTime}</cbc:IssueTime>
-    <cbc:InvoiceTypeCode name="0200000">388</cbc:InvoiceTypeCode>
+    <cbc:InvoiceTypeCode name="0200000">${invoiceType}</cbc:InvoiceTypeCode>
     <cbc:DocumentCurrencyCode>${currCode}</cbc:DocumentCurrencyCode>
     <cbc:TaxCurrencyCode>${currCode}</cbc:TaxCurrencyCode>
     <cac:AdditionalDocumentReference>
@@ -363,7 +373,7 @@ function buildSimplifiedInvoiceXml(sale, business, location, icv, pih) {
             <cbc:EmbeddedDocumentBinaryObject mimeCode="text/plain">${pih}</cbc:EmbeddedDocumentBinaryObject>
         </cac:Attachment>
     </cac:AdditionalDocumentReference>
-    <cac:AccountingSupplierParty>
+${billingRef}    <cac:AccountingSupplierParty>
         <cac:Party>
             <cac:PartyIdentification>
                 <cbc:ID schemeID="${crLabel}">${crNumber}</cbc:ID>

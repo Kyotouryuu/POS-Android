@@ -238,12 +238,12 @@ public class BluetoothPrinterManager {
 
         try {
             OutputStream out = socket.getOutputStream();
-            int offset = 0;
-            while (offset < data.length) {
-                int chunk = Math.min(16384, data.length - offset);
-                out.write(data, offset, chunk);
-                offset += chunk;
-            }
+            // Feed 4 lines then partial cut so the receipt tears cleanly.
+            byte[] cut = {0x1b, 0x64, 0x04, 0x1d, 0x56, 0x01};
+            byte[] full = new byte[data.length + cut.length];
+            System.arraycopy(data, 0, full, 0, data.length);
+            System.arraycopy(cut, 0, full, data.length, cut.length);
+            out.write(full);
             out.flush();
             Thread.sleep(200);
             sendPrintResult(requestId, true, null);

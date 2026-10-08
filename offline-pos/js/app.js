@@ -173,6 +173,11 @@ createApp({
         const gridScrollTop  = ref(0);
         const gridContainerH = ref(600); // measured via ResizeObserver after mount
 
+        // ── Mobile orientation tracking (for grid column count) ──────────────
+        const mobileIsLandscape = ref(
+            typeof window !== 'undefined' && window.matchMedia('(orientation: landscape)').matches
+        );
+
         // ── Manual search ─────────────────────────────────────────────────────
         const showManualSearchModal  = ref(false);
         const manualSearchQuery      = ref('');
@@ -191,6 +196,7 @@ createApp({
         const selectedLot            = ref(null);
 
         const showAddCustomerModal   = ref(false);
+        const newCustomerShowMore    = ref(false);
         const newCustomerForm        = ref({
             contact_kind:             'individual',
             name:                     '',
@@ -968,8 +974,13 @@ createApp({
             )
         );
 
+        let _scrollRafId = null;
         const onGridScroll = () => {
-            if (gridEl.value) gridScrollTop.value = gridEl.value.scrollTop;
+            if (_scrollRafId) return;
+            _scrollRafId = requestAnimationFrame(() => {
+                _scrollRafId = null;
+                if (gridEl.value) gridScrollTop.value = gridEl.value.scrollTop;
+            });
         };
 
         // ── Mobile list-view virtual scroll (additive; independent of the grid's
@@ -991,6 +1002,50 @@ createApp({
         );
         const mListVisibleProducts = computed(() =>
             mListTotalRows.value === 0 ? [] : displayProducts.value.slice(mListFirstIdx.value, mListLastIdx.value + 1)
+        );
+
+        // ── Mobile grid virtual scroll ────────────────────────────────────────
+        // Uses the real CSS column count (2 portrait / 5 landscape) and a stable
+        // row-height ref measured from the DOM — never estimated, never read on scroll.
+        const M_GRID_OVERSCAN  = 5;
+        const mMGridCols       = computed(() => mobileIsLandscape.value ? 5 : 2);
+        const mMGridRowH       = ref(260);
+        const _updateMMGridRowH = () => {
+            nextTick(() => {
+                const card = gridEl.value?.querySelector('.m-product-card');
+                if (card) {
+                    const gap = mobileIsLandscape.value ? 8 : 12;
+                    mMGridRowH.value = card.offsetHeight + gap;
+                    return;
+                }
+                // Fallback: geometry estimate (card width drives aspect-square image height)
+                const el         = gridEl.value;
+                const containerW = el ? el.clientWidth : 390;
+                const landscape  = mobileIsLandscape.value;
+                const gap        = landscape ? 8 : 12;
+                const cols       = landscape ? 5 : 2;
+                const cardW      = (containerW - 24 - gap * (cols - 1)) / cols;
+                // p-2.5 top(10) + image(cardW-20) + mb-2.5(10) + name(16) + sku(13) + footer(28) + p-2.5 bottom(10)
+                mMGridRowH.value = Math.round(10 + (cardW - 20) + 10 + 16 + 13 + 28 + 10 + gap);
+            });
+        };
+        const mMGridTotalRows  = computed(() => Math.ceil(displayProducts.value.length / mMGridCols.value));
+        const mMGridFirstRow   = computed(() =>
+            Math.max(0, Math.floor(gridScrollTop.value / mMGridRowH.value) - M_GRID_OVERSCAN)
+        );
+        const mMGridLastRow    = computed(() =>
+            Math.min(mMGridTotalRows.value - 1,
+                Math.ceil((gridScrollTop.value + gridContainerH.value) / mMGridRowH.value) + M_GRID_OVERSCAN)
+        );
+        const mMGridTopPad     = computed(() => mMGridFirstRow.value * mMGridRowH.value);
+        const mMGridBottomPad  = computed(() =>
+            Math.max(0, (mMGridTotalRows.value - mMGridLastRow.value - 1) * mMGridRowH.value)
+        );
+        const mMGridVisible    = computed(() =>
+            displayProducts.value.slice(
+                mMGridFirstRow.value * mMGridCols.value,
+                (mMGridLastRow.value + 1) * mMGridCols.value
+            )
         );
 
         const filteredProducts = computed(() => {
@@ -1421,6 +1476,19 @@ createApp({
             if (gridEl.value) gridEl.value.scrollTop = 0;
         });
 
+        // Measure actual card height once cards are in the DOM so the virtual
+        // scroll spacers use the real height, not an estimate.
+        let _mMGridMeasured = false;
+        watch(mMGridVisible, (items) => {
+            if (!_mMGridMeasured && items.length > 0) {
+                _updateMMGridRowH();
+                _mMGridMeasured = true;
+            }
+        }, { flush: 'post' });
+
+        // Re-measure when orientation changes (cards are different width).
+        watch(mobileIsLandscape, () => { _mMGridMeasured = false; });
+
         const onPrimarySearchInput = () => {
             showProductSuggestion.value = true;
             if (scannerSearchTimer.value) clearTimeout(scannerSearchTimer.value);
@@ -1774,6 +1842,7 @@ createApp({
                 customer_group_id:        '',
             };
             newCustomerFieldErrors.value = {};
+            newCustomerShowMore.value = false;
             showAddCustomerModal.value = true;
         };
 
@@ -2388,10 +2457,7 @@ createApp({
             // in its own centered block. No outer table, no borders.
             let receipt;
             if (isMobileApp) {
-                let targetWidthPx = 384;
-                if (selectedPrinterType.value === 'sunmi' && sunmiPrinterAvailable.value) {
-                    targetWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
-                }
+                let targetWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
                 const mobileHtml = buildMobileThermalReceiptHtml(
                     sale, settings.value, business.value, locations.value,
                     invoiceLayouts.value, targetWidthPx,
@@ -2538,18 +2604,51 @@ createApp({
             try {
                 const sale  = returningFromSale.value;
                 const total = returnTotal.value;
+                const returnUuid  = crypto.randomUUID();
+                const returnItems = items.map(i => ({ ...i, quantity: parseFloat(i.return_qty) || 0 }));
+                const returnTax   = returnItems.reduce((sum, i) => {
+                    return sum + (parseFloat(i.quantity) || 0) * (parseFloat(i.item_tax_per_unit) || 0);
+                }, 0);
                 const rec = {
                     type:                       'sell_return',
                     return_parent_invoice_no:   sale.server_invoice_no || sale.invoice_no,
-                    local_uuid:                 crypto.randomUUID(),
+                    local_uuid:                 returnUuid,
+                    invoice_no:                 'RET-' + returnUuid.slice(0, 8).toUpperCase(),
                     location_id:                sale.location_id || settings.value.locationId,
-                    items:                      items.map(i => ({ ...i, quantity: parseFloat(i.return_qty) || 0 })),
+                    items:                      returnItems,
                     total,
+                    tax:                        returnTax,
                     payments:                   [{ method: returnMethod.value, amount: total, is_return: true }],
                     sync_status:                'pending',
                     created_at:                 new Date().toISOString(),
+                    zatca_qr_code:              null,
+                    zatca_hash:                 null,
                 };
-                await db.transactions.add(cloneForIdb(rec));
+
+                // Generate ZATCA QR for the return (credit note type 381)
+                if (zatcaCertificate.value && typeof generateZatcaQr === 'function') {
+                    try {
+                        const loc         = locations.value.find(l => String(l.id) === String(rec.location_id)) || {};
+                        const prevHashRec = await db.settings.get('zatca_last_hash');
+                        const icvRec      = await db.settings.get('zatca_icv');
+                        const prevHash    = prevHashRec?.data || null;
+                        const icv         = (icvRec?.data || 0) + 1;
+                        const zatcaResult = await generateZatcaQr(rec, business.value, loc, zatcaCertificate.value, prevHash, icv);
+                        if (zatcaResult) {
+                            rec.zatca_qr_code = zatcaResult.zatca_qr_code;
+                            rec.zatca_hash    = zatcaResult.zatca_hash;
+                            await db.transaction('rw', db.settings, async () => {
+                                await db.settings.put({ key: 'zatca_last_hash', data: zatcaResult.zatca_hash });
+                                await db.settings.put({ key: 'zatca_icv',       data: icv });
+                            });
+                        }
+                    } catch (e) {
+                        console.error('[ZATCA] Return QR generation error:', e);
+                    }
+                }
+
+                const returnId = await db.transactions.add(cloneForIdb(rec));
+                lastReceipt.value = { ...rec, id: returnId };
                 // Reduce original sale item quantities by the returned amounts
                 const originalSale = returningFromSale.value;
                 if (originalSale?.id) {
@@ -2560,13 +2659,14 @@ createApp({
                         if (!returnedQty) return origItem;
                         return { ...origItem, quantity: Math.max(0, (parseFloat(origItem.quantity) || 0) - returnedQty) };
                     });
-                    await db.transactions.update(originalSale.id, { items: updatedItems });
+                    await db.transactions.update(originalSale.id, { items: cloneForIdb(updatedItems) });
                 }
                 await loadSales();
                 showReturnModal.value   = false;
                 returningFromSale.value = null;
                 returnItems.value       = [];
                 toast(t('return_saved'), 'success');
+                printReceipt(lastReceipt.value, { silent: true });
                 if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
             } catch (e) {
                 toast(e?.message || t('error_saving_return'), 'error');
@@ -2664,6 +2764,11 @@ createApp({
                 selectedBluetoothPrinterInfo.value = mobilePrn.data.bluetooth || null;
                 wifiPrinterIp.value = mobilePrn.data.wifiIp || '';
                 if (mobilePrn.data.sunmiPaperWidthMm) sunmiPaperWidthMm.value = mobilePrn.data.sunmiPaperWidthMm;
+                // Pre-populate the BT list with the saved printer so it shows as selected
+                // immediately on boot without requiring the user to scan first.
+                if (selectedBluetoothPrinterInfo.value?.address) {
+                    bluetoothPrinters.value = [selectedBluetoothPrinterInfo.value];
+                }
                 if (selectedBluetoothPrinterInfo.value && window.zatSetBluetoothPrinter) {
                     window.zatSetBluetoothPrinter(selectedBluetoothPrinterInfo.value);
                 }
@@ -4625,10 +4730,7 @@ createApp({
         };
 
         const printCloseRegisterReceipt = async (snapshot, form) => {
-            let targetWidthPx = 384;
-            if (selectedPrinterType.value === 'sunmi' && sunmiPrinterAvailable.value) {
-                targetWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
-            }
+            let targetWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
             const html = buildCloseRegisterReceiptHtml(snapshot, form, business.value, targetWidthPx);
             let receipt = {
                 is_enabled: true,
@@ -4692,6 +4794,13 @@ createApp({
             window.ReactNativeWebView?.postMessage?.(JSON.stringify({ type: 'check_sunmi_available' }));
 
             await loadSettings();
+
+            // Auto-scan bluetooth in the background when a BT printer is already configured.
+            // This refreshes the visible device list with currently available hardware without
+            // requiring the user to manually press Scan on every boot.
+            if (selectedPrinterType.value === 'bluetooth' && selectedBluetoothPrinterInfo.value?.address) {
+                setTimeout(() => scanBluetoothPrinters(), 1500);
+            }
 
             // Seed from flag set before Vue mounted (service connected early).
             // Must run AFTER loadSettings() so it isn't overwritten by the saved printer type.
@@ -4765,11 +4874,27 @@ createApp({
             nextTick(() => {
                 if (gridEl.value) {
                     gridContainerH.value = gridEl.value.clientHeight;
+                    _updateMMGridRowH();
                     new ResizeObserver(() => {
-                        if (gridEl.value) gridContainerH.value = gridEl.value.clientHeight;
+                        if (gridEl.value) {
+                            gridContainerH.value = gridEl.value.clientHeight;
+                            _updateMMGridRowH();
+                        }
                     }).observe(gridEl.value);
                 }
             });
+
+            // Keep mobileIsLandscape in sync so the mobile-grid virtual scroll
+            // uses the correct column count after the device rotates.
+            const orientationMq = window.matchMedia('(orientation: landscape)');
+            const onOrientationChange = (e) => {
+                mobileIsLandscape.value = e.matches;
+                nextTick(_updateMMGridRowH);
+                // Reset scroll so padding spacers recalculate from the top.
+                gridScrollTop.value = 0;
+                if (gridEl.value) gridEl.value.scrollTop = 0;
+            };
+            orientationMq.addEventListener('change', onOrientationChange);
 
             document.addEventListener('click', (e) => {
                 if (!e.target.closest('[data-pos-dropdown]')) {
@@ -4997,7 +5122,7 @@ createApp({
             showModifierModal, pendingProductForModifier, tempModifierSelections,
             // Lots
             showLotModal, pendingProductForLot, selectedLot,
-            showAddCustomerModal, newCustomerForm, newCustomerFieldErrors,
+            showAddCustomerModal, newCustomerShowMore, newCustomerForm, newCustomerFieldErrors,
             // Returns
             showReturnModal, returningFromSale, returnItems, returnTotal, returnMethod, returnSaving,
             // Payment
@@ -5073,6 +5198,7 @@ createApp({
             openOpenRegisterFlow, submitOpenRegister, dismissOpenRegisterModal, switchCloseModalToOpenRegister,
             gridEl, onGridScroll, visibleProducts, vTopPad, vBottomPad, vTotalH,
             mListVisibleProducts, mListTopPad, mListBottomPad,
+            mMGridVisible, mMGridTopPad, mMGridBottomPad,
             // Backup
             autoBackupEnabled, backupFileApiSupported, isExporting, isImporting,
             exportBackup, importBackup, pickAutoBackupFile, disableAutoBackup,

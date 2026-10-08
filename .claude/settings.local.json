@@ -36,7 +36,8 @@
       "Bash(curl -sSL https://raw.githubusercontent.com/januslo/react-native-sunmi-inner-printer/master/android/src/main/java/woyou/aidlservice/jiuiv5/IWoyouService.aidl -o /c/temp/IWoyouService.aidl)",
       "Bash(curl -sSL https://raw.githubusercontent.com/januslo/react-native-sunmi-inner-printer/master/android/src/main/java/woyou/aidlservice/jiuiv5/ICallback.aidl -o /c/temp/ICallback.aidl)",
       "Read(//c/temp/**)",
-      "Bash(curl *)"
+      "Bash(curl *)",
+      "Bash(xargs grep *)"
     ]
   }
 }

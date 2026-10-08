@@ -957,31 +957,71 @@ function escPosGsV0RasterFromCanvas(canvas) {
     var h = canvas.height;
     var img = ctx.getImageData(0, 0, w, h).data;
     var widthBytes = Math.ceil(w / 8);
-    var out = [];
-    out.push(0x1b, 0x40);
-    out.push(0x1d, 0x76, 0x30, 0x00);
-    out.push(widthBytes & 0xff, (widthBytes >> 8) & 0xff);
-    out.push(h & 0xff, (h >> 8) & 0xff);
-    for (var y = 0; y < h; y += 1) {
-        for (var bx = 0; bx < widthBytes; bx += 1) {
-            var byte = 0;
-            for (var bit = 0; bit < 8; bit += 1) {
+
+    // Pre-compute every row; null = fully blank (all white).
+    var rows = new Array(h);
+    for (var y = 0; y < h; y++) {
+        var rowBytes = new Uint8Array(widthBytes);
+        var hasInk = false;
+        for (var bx = 0; bx < widthBytes; bx++) {
+            var b = 0;
+            for (var bit = 0; bit < 8; bit++) {
                 var x = bx * 8 + bit;
-                var ink = 0;
                 if (x < w) {
                     var idx = (y * w + x) * 4;
-                    var r = img[idx];
-                    var g = img[idx + 1];
-                    var b = img[idx + 2];
-                    var a = img[idx + 3];
-                    var lum = (0.299 * r + 0.587 * g + 0.114 * b) * (a / 255);
-                    ink = lum < 195 ? 1 : 0;
-                }
-                if (ink) {
-                    byte |= 1 << (7 - bit);
+                    var lum = (0.299 * img[idx] + 0.587 * img[idx + 1] + 0.114 * img[idx + 2]) * (img[idx + 3] / 255);
+                    if (lum < 195) { b |= 1 << (7 - bit); hasInk = true; }
                 }
             }
-            out.push(byte);
+            rowBytes[bx] = b;
+        }
+        rows[y] = hasInk ? rowBytes : null;
+    }
+
+    // Label each blank run: runs >= threshold → 'feed' (ESC J), smaller → 'keep' (raster).
+    // Many cheap BT thermal printers mishandle ESC J between raster blocks — paper
+    // either doesn't advance by the expected amount or the feed is swallowed entirely,
+    // which eats intentional vertical spacing (e.g. the ~50px padding above the ZATCA
+    // QR). Keep the threshold high enough that normal in-document spacing stays in
+    // the raster stream; ESC J only kicks in for huge dead zones.
+    var BLANK_SKIP_THRESHOLD = 400;
+    var rowLabel = new Uint8Array(h); // 0=ink, 1=keep-blank, 2=feed-blank
+    var i = 0;
+    while (i < h) {
+        if (rows[i] === null) {
+            var bs = i;
+            while (i < h && rows[i] === null) i++;
+            var label = (i - bs) >= BLANK_SKIP_THRESHOLD ? 2 : 1;
+            for (var j = bs; j < i; j++) rowLabel[j] = label;
+        } else {
+            rowLabel[i] = 0;
+            i++;
+        }
+    }
+
+    // Emit: contiguous ink+keep-blank rows → one GS v 0 block; feed-blank runs → ESC J.
+    var out = [0x1b, 0x40];
+    i = 0;
+    while (i < h) {
+        if (rowLabel[i] === 2) {
+            var feedCount = 0;
+            while (i < h && rowLabel[i] === 2) { feedCount++; i++; }
+            while (feedCount > 0) {
+                var f = feedCount > 255 ? 255 : feedCount;
+                out.push(0x1b, 0x4a, f);
+                feedCount -= f;
+            }
+        } else {
+            var segStart = i;
+            while (i < h && rowLabel[i] !== 2) i++;
+            var segH = i - segStart;
+            out.push(0x1d, 0x76, 0x30, 0x00,
+                widthBytes & 0xff, (widthBytes >> 8) & 0xff,
+                segH & 0xff, (segH >> 8) & 0xff);
+            for (var ry = segStart; ry < i; ry++) {
+                var rowData = rows[ry];
+                for (var bx2 = 0; bx2 < widthBytes; bx2++) out.push(rowData ? rowData[bx2] : 0);
+            }
         }
     }
     out.push(0x1b, 0x64, 0x03);
@@ -1078,7 +1118,7 @@ async function renderReceiptToThermalCanvas(receipt, thermalWidth) {
 
         var canvas = await window.html2canvas(root, {
             backgroundColor: '#FFFFFF',
-            scale: 2,
+            scale: 1,
             useCORS: true,
             logging: false,
             imageTimeout: 0,
@@ -1114,10 +1154,12 @@ async function renderReceiptToThermalCanvas(receipt, thermalWidth) {
                     rules.push('.slim-line-items-header,.slim-line-items-table th{font-size:11px!important;padding:2px!important}');
                 } else {
                     // 80mm (~576px @ 203dpi, ~48 chars/line): more breathing room, larger baseline.
-                    rules.push('body{font-size:14px!important;line-height:1.4!important}');
-                    rules.push('th,td{padding:4px 5px!important;font-size:14px!important;line-height:1.35!important}');
-                    rules.push('small{font-size:12px!important}');
-                    rules.push('svg{max-width:180px!important;height:auto!important}');
+                    // Avoid overriding th/td padding or font-size — buildMobileThermalReceiptHtml
+                    // sets those as inline styles and !important here would silently crush them.
+                    rules.push('body{font-size:16px!important}');
+                    rules.push('small{font-size:13px!important}');
+                    // Allow QR SVG up to 260px — the .zatca-qr-block svg CSS controls exact size.
+                    rules.push('svg{max-width:260px!important;max-height:260px!important}');
                 }
                 fixStyle.textContent = rules.join('');
                 clonedDoc.head.appendChild(fixStyle);
@@ -1161,10 +1203,12 @@ async function captureReceiptImage(receipt) {
  * PNG + GS v 0 raster ESC/POS (base64) for Wi‑Fi thermal when the server sends slim HTML + QR/barcode-only commands.
  */
 async function captureReceiptWifiThermalPayloads(receipt) {
-    var resizedCanvas = await renderReceiptToThermalCanvas(receipt);
+    var tw = (receipt && receipt.thermal_width && receipt.thermal_width >= 200)
+        ? parseInt(receipt.thermal_width) : BLUETOOTH_THERMAL_WIDTH;
+    var resizedCanvas = await renderReceiptToThermalCanvas(receipt, tw);
     var png = resizedCanvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '');
     var escpos = uint8ToBase64EscPos(escPosGsV0RasterFromCanvas(resizedCanvas));
-    return { raster_png_base64: png, escpos_base64: escpos };
+    return { raster_png_base64: png, escpos_base64: escpos, thermal_width: tw };
 }
 
 function printDebugLog() {}
@@ -1313,7 +1357,8 @@ function printViaAndroidBridge(receipt) {
                     });
                 } catch (e) {}
             }
-            captureReceiptWifiThermalPayloads({ html_content: htmlContent }).then(function(payloads) {
+            captureReceiptWifiThermalPayloads({ html_content: htmlContent, thermal_width: receipt.thermal_width || BLUETOOTH_THERMAL_WIDTH }).then(function(payloads) {
+                var tw = payloads.thermal_width || receipt.thermal_width || BLUETOOTH_THERMAL_WIDTH;
                 var fallback = {
                     type: 'bluetooth_print_receipt',
                     requestId: requestId,
@@ -1322,7 +1367,7 @@ function printViaAndroidBridge(receipt) {
                     bluetooth_printer_mac: address,
                     bluetooth_printer_name: name,
                     escpos_base64: payloads.escpos_base64,
-                    thermal_width: BLUETOOTH_THERMAL_WIDTH
+                    thermal_width: tw
                 };
                 var kb = Math.round((payloads.escpos_base64.length * 0.75) / 1024);
                 sendPayload(fallback, { status: 'Sent ESC/POS raster (' + kb + ' KB) to app', source: 'local-html' });
@@ -1805,12 +1850,29 @@ function printViaAndroidWifiBridge(receipt) {
             window.ReactNativeWebView.postMessage(JSON.stringify(payload));
         }
 
-        if (inlineEscU || inlineEscB) {
-            return captureReceiptWifiThermalPayloads(htmlContent ? { html_content: htmlContent } : {}).then(function(payloads) {
+        if (receipt && receipt.use_local_html && htmlContent) {
+            var wifiLocalTw = receipt.thermal_width || BLUETOOTH_THERMAL_WIDTH;
+            return captureReceiptWifiThermalPayloads({ html_content: htmlContent, thermal_width: wifiLocalTw }).then(function(payloads) {
                 sendPayload(buildWifiEscposMessage(requestId, name, ipAddress, portNum, {
                     escpos_base64: payloads.escpos_base64,
                     raster_png_base64: payloads.raster_png_base64,
-                    thermal_width: BLUETOOTH_THERMAL_WIDTH
+                    thermal_width: payloads.thermal_width || wifiLocalTw
+                }), { status: 'Client-rendered local thermal HTML sent to Wi-Fi printer', source: 'local-html' });
+            }).catch(function(capErr) {
+                console.warn('Wi-Fi: local HTML render failed, sending raw HTML', capErr);
+                sendPayload(buildWifiEscposMessage(requestId, name, ipAddress, portNum, {
+                    html_content: htmlContent, thermal_width: wifiLocalTw
+                }), { status: 'HTML fallback (render failed)', source: 'local-html' });
+            });
+        }
+
+        if (inlineEscU || inlineEscB) {
+            var inlineRcpt = htmlContent ? { html_content: htmlContent, thermal_width: receipt.thermal_width || BLUETOOTH_THERMAL_WIDTH } : { thermal_width: receipt.thermal_width || BLUETOOTH_THERMAL_WIDTH };
+            return captureReceiptWifiThermalPayloads(inlineRcpt).then(function(payloads) {
+                sendPayload(buildWifiEscposMessage(requestId, name, ipAddress, portNum, {
+                    escpos_base64: payloads.escpos_base64,
+                    raster_png_base64: payloads.raster_png_base64,
+                    thermal_width: payloads.thermal_width || BLUETOOTH_THERMAL_WIDTH
                 }), {
                     status: 'Client-rendered thermal raster (bypassed inline escpos binary)',
                     source: 'receipt'
