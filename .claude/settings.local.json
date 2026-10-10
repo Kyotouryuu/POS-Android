@@ -37,7 +37,13 @@
       "Bash(curl -sSL https://raw.githubusercontent.com/januslo/react-native-sunmi-inner-printer/master/android/src/main/java/woyou/aidlservice/jiuiv5/ICallback.aidl -o /c/temp/ICallback.aidl)",
       "Read(//c/temp/**)",
       "Bash(curl *)",
-      "Bash(xargs grep *)"
+      "Bash(xargs grep *)",
+      "Bash(pandoc --version)",
+      "Bash(pip show *)",
+      "Bash(python *)",
+      "Bash(node --input-type=module)",
+      "Bash(node -e ' *)",
+      "Bash(grep -v \"^\\\\s*//\")"
     ]
   }
 }

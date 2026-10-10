@@ -142,9 +142,12 @@ createApp({
         const showBrandDrawer       = ref(false);
 
         // ── App update check ─────────────────────────────────────────────────
-        const appVersion   = ref(null);
-        const updateStatus = ref('idle'); // idle | checking | up_to_date | update_available | error
-        const updateInfo   = ref(null);   // { version, downloadUrl }
+        const appVersion          = ref(null);
+        const updateStatus        = ref('idle'); // idle | checking | up_to_date | update_available | error
+        const updateInfo          = ref(null);   // { version, downloadUrl }
+        const apkDownloadStatus   = ref('idle'); // idle | downloading | installing | error
+        const apkDownloadProgress = ref(0);
+        const apkDownloadError    = ref(null);
         const showHeldSalesModal    = ref(false);
         const showOrderConfigStrip  = ref(false);
         const editingItem           = ref(null);
@@ -2580,9 +2583,15 @@ createApp({
             }, 0)
         );
 
+        const returnHasItems = computed(() =>
+            (returnItems.value || []).some(i => (parseFloat(i.return_qty) || 0) > 0)
+        );
+
         const openReturnModal = (sale) => {
+            const returnable = (sale.items || []).filter(i => (parseFloat(i.quantity) || 0) > 0);
+            if (!returnable.length) { toast(t('already_fully_returned'), 'error'); return; }
             returningFromSale.value = sale;
-            returnItems.value       = (sale.items || []).map(i => ({ ...i, return_qty: '' }));
+            returnItems.value       = returnable.map(i => ({ ...i, return_qty: '' }));
             // Bug 9 fix: default refund method to the original payment method
             returnMethod.value      = sale.payments?.[0]?.method || 'cash';
             showReturnModal.value   = true;
@@ -2599,6 +2608,8 @@ createApp({
             if (returnSaving.value) return;
             const items = returnItems.value.filter(i => (parseFloat(i.return_qty) || 0) > 0);
             if (!items.length) { toast(t('select_return_qty'), 'error'); return; }
+            const overQty = items.find(i => (parseFloat(i.return_qty) || 0) > (parseFloat(i.quantity) || 0));
+            if (overQty) { toast(t('return_qty_exceeds_available'), 'error'); return; }
             if (await blockSaleIfPhase2Offline()) return;
             returnSaving.value = true;
             try {
@@ -3041,11 +3052,10 @@ createApp({
         };
 
         const checkForUpdate = async () => {
-            const serverUrl = String(settings.value.serverUrl || '').trim().replace(/\/+$/, '');
-            if (!serverUrl || !isOnline.value || !appVersion) return;
+            if (!isOnline.value || !appVersion.value) return;
             updateStatus.value = 'checking';
             try {
-                const res = await fetch(`${serverUrl}/api/app-version/offline_pos`);
+                const res = await fetch('https://zaterp.com/api/app-version/mobile');
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 if (!data.version) throw new Error('No version');
@@ -3062,7 +3072,23 @@ createApp({
         };
 
         const openUpdateDownload = async (url) => {
-            await window.api.openExternal(url);
+            if (!window.api?.isCapacitor?.()) {
+                await window.api.openExternal(url);
+                return;
+            }
+            apkDownloadStatus.value   = 'downloading';
+            apkDownloadProgress.value = 0;
+            apkDownloadError.value    = null;
+            window.api.downloadAndInstallApk(url, null, (detail) => {
+                if (detail.error !== undefined) {
+                    apkDownloadStatus.value = 'error';
+                    apkDownloadError.value  = detail.error;
+                } else if (detail.installing) {
+                    apkDownloadStatus.value = 'installing';
+                } else if (detail.progress !== undefined) {
+                    apkDownloadProgress.value = detail.progress;
+                }
+            });
         };
 
         watch([showSettings, settingsTab], ([open, tab]) => {
@@ -3712,6 +3738,7 @@ createApp({
                     offline_created_at:         s.created_at,
                     sell_lines: (s.items || []).map(item => ({
                         variation_sku:        item.sku,
+                        variation_id:         item.variation_id,
                         quantity:             item.quantity,
                         unit_price:           +(item.unit_price || 0),
                         unit_price_inc_tax:   +(item.unit_price || 0),
@@ -5124,7 +5151,7 @@ createApp({
             showLotModal, pendingProductForLot, selectedLot,
             showAddCustomerModal, newCustomerShowMore, newCustomerForm, newCustomerFieldErrors,
             // Returns
-            showReturnModal, returningFromSale, returnItems, returnTotal, returnMethod, returnSaving,
+            showReturnModal, returningFromSale, returnItems, returnTotal, returnHasItems, returnMethod, returnSaving,
             // Payment
             payments, paymentMethods, changeReturnMethod,
             // Sales filters
@@ -5194,6 +5221,7 @@ createApp({
             syncAll, pushSales, retryFailed, clearPushFailureAudit,
             syncFailureLog, clearSyncFailureLog,
             appVersion, updateStatus, updateInfo, checkForUpdate, openUpdateDownload,
+            apkDownloadStatus, apkDownloadProgress, apkDownloadError,
             openCloseRegisterFlow, retryCloseRegisterFlow, submitCloseRegister, dismissCloseRegisterModal,
             openOpenRegisterFlow, submitOpenRegister, dismissOpenRegisterModal, switchCloseModalToOpenRegister,
             gridEl, onGridScroll, visibleProducts, vTopPad, vBottomPad, vTotalH,

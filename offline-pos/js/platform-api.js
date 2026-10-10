@@ -460,6 +460,22 @@ window.platformAPI = {
     }
     // Fallback for web
     return window.open(url, '_blank');
+  },
+
+  // onProgress({ progress: 0-100 } | { installing: true } | { error: string })
+  downloadAndInstallApk(url, apiKey, onProgress) {
+    if (!this.isCapacitor()) {
+      return this.openExternal(url);
+    }
+    const handler = (e) => {
+      const detail = e.detail || {};
+      if (detail.error !== undefined || detail.installing || detail.progress === 100) {
+        window.removeEventListener('apk-download-progress', handler);
+      }
+      onProgress?.(detail);
+    };
+    window.addEventListener('apk-download-progress', handler);
+    window.ReactNativeWebView?.postMessage?.(JSON.stringify({ type: 'download_and_install_apk', url, apiKey: apiKey || '' }));
   }
 };
 

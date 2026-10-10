@@ -117,6 +117,9 @@ window.I18N = {
     update_up_to_date: 'أنت تستخدم أحدث إصدار',
     update_error: 'تعذر التحقق من التحديثات',
     download_update: 'تحميل التحديث',
+    downloading_update: 'جاري تحميل التحديث...',
+    launching_installer: 'جاري تشغيل المثبّت...',
+    retry: 'إعادة المحاولة',
     attempts_label: 'المحاولات',
     records_suffix: '{count} سجل',
     col_invoice: 'الفاتورة',
@@ -551,6 +554,8 @@ window.I18N = {
 
     // Return
     select_return_qty: 'حدد كميات للإرجاع.',
+    already_fully_returned: 'تم إرجاع هذه الفاتورة بالكامل.',
+    return_qty_exceeds_available: 'كمية الإرجاع تتجاوز الكمية المتاحة.',
     return_saved: 'تم حفظ الإرجاع.',
 
     // Delete synced sale
@@ -986,6 +991,9 @@ window.I18N = {
     update_up_to_date: 'You have the latest version',
     update_error: 'Could not check for updates',
     download_update: 'Download Update',
+    downloading_update: 'Downloading update...',
+    launching_installer: 'Launching installer...',
+    retry: 'Retry',
     attempts_label: 'Attempts',
     records_suffix: '{count} records',
     col_invoice: 'Invoice',
@@ -1420,6 +1428,8 @@ window.I18N = {
 
     // Return
     select_return_qty: 'Select quantities to return.',
+    already_fully_returned: 'This invoice has already been fully returned.',
+    return_qty_exceeds_available: 'Return quantity exceeds available quantity.',
     return_saved: 'Return saved.',
 
     // Delete synced sale
