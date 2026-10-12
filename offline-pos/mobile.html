@@ -510,7 +510,7 @@
                         <div class="min-w-0">
                             <div class="flex items-center gap-1.5 flex-wrap">
                                 <span class="font-bold text-sm text-slate-800">{{ s.server_invoice_no || s.invoice_no }}</span>
-                                <span v-if="s.type === 'sell_return'" class="px-1.5 py-0.5 rounded-full text-[9px] font-semibold bg-violet-100 text-violet-700 border border-violet-200">{{ t('return_badge') }}</span>
+                                <span v-if="s.type === 'sell_return'" class="inline-flex items-center whitespace-nowrap px-1.5 py-0.5 rounded-full text-[9px] font-semibold leading-none bg-violet-100 text-violet-700 border border-violet-200">{{ t('return_badge') }}</span>
                                 <span v-if="s.type !== 'sell_return'" class="px-1.5 py-0.5 rounded-full text-[9px] font-semibold border"
                                     :class="{
                                         'bg-emerald-50 text-emerald-700 border-emerald-200': s.payment_status === 'paid',

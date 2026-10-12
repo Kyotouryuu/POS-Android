@@ -3059,7 +3059,7 @@ createApp({
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 if (!data.version) throw new Error('No version');
-                if (semverGt(data.version, appVersion)) {
+                if (semverGt(data.version, appVersion.value)) {
                     updateStatus.value = 'update_available';
                     updateInfo.value   = { version: data.version, downloadUrl: data.download_url };
                 } else {

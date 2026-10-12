@@ -89,6 +89,16 @@ public class ReactNativeWebViewBridge {
                 }
                 conn.connect();
 
+                int responseCode = conn.getResponseCode();
+                if (responseCode < 200 || responseCode >= 300) {
+                    throw new Exception("HTTP " + responseCode);
+                }
+
+                String contentType = conn.getContentType();
+                if (contentType != null && contentType.startsWith("text/")) {
+                    throw new Exception("Server returned " + contentType + " instead of APK");
+                }
+
                 int fileLength = conn.getContentLength();
                 File apkFile = new File(context.getCacheDir(), "zat_update.apk");
 
@@ -109,6 +119,16 @@ public class ReactNativeWebViewBridge {
                                 dispatchProgressEvent(progress);
                             }
                         }
+                    }
+                }
+
+                // Validate APK magic bytes (ZIP: PK\x03\x04)
+                try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(apkFile, "r")) {
+                    if (raf.length() < 4) throw new Exception("Downloaded file too small (" + raf.length() + " bytes)");
+                    byte[] magic = new byte[2];
+                    raf.read(magic);
+                    if (magic[0] != 0x50 || magic[1] != 0x4B) {
+                        throw new Exception("Downloaded file is not a valid APK (bad magic bytes)");
                     }
                 }
 

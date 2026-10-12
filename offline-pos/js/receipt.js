@@ -513,7 +513,7 @@ function fillReceiptTemplate(templateHtml, sale, settings, locations, invoiceLay
         .replace(/ZAT_CUSTOMER_INFO/g, customerInfo);
 
     if (isReturn) {
-        const returnBadge = `<div style="text-align:center;font-weight:900;font-size:1.3em;border:2px solid #000;padding:4px 0;margin:6px 0;letter-spacing:2px;">مرتجع بيع</div>`;
+        const returnBadge = `<div style="text-align:center;font-weight:900;font-size:1.3em;border:2px solid #000;padding:4px 0;margin:6px 0;">مرتجع بيع</div>`;
         const parentLine  = sale.return_parent_invoice_no
             ? `<div style="font-size:0.9em;margin-top:2px;">الفاتورة الأصلية: ${sale.return_parent_invoice_no}</div>`
             : '';

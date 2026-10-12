@@ -43,7 +43,10 @@
       "Bash(python *)",
       "Bash(node --input-type=module)",
       "Bash(node -e ' *)",
-      "Bash(grep -v \"^\\\\s*//\")"
+      "Bash(grep -v \"^\\\\s*//\")",
+      "Bash(xxd \"/c/Users/Kyo/Downloads/app-debug \\(8\\).apk\")",
+      "Bash(python3 -c ' *)",
+      "Bash(xxd /tmp/test.apk)"
     ]
   }
 }

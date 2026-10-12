@@ -950,7 +950,7 @@
                             <td class="px-4 py-3">
                                 <span class="font-semibold text-sm text-slate-800">{{ s.server_invoice_no || s.invoice_no }}</span>
                                 <span v-if="s.type === 'sell_return'"
-                                    class="me-2 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-violet-100 text-violet-700 border border-violet-200">{{ t('return_badge') }}</span>
+                                    class="ms-2 inline-flex items-center whitespace-nowrap px-2 py-0.5 rounded-full text-[10px] font-semibold leading-none bg-violet-100 text-violet-700 border border-violet-200">{{ t('return_badge') }}</span>
                             </td>
                             <td class="px-3 py-3 text-slate-500 text-xs">{{ fmtDate(s.created_at) }}</td>
                             <td class="px-3 py-3 text-sm text-slate-700">{{ s.customer_name || (s.type === 'sell_return' ? t('return_badge') : t('walk_in_customer')) }}</td>
