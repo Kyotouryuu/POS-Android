@@ -53,11 +53,25 @@ createApp({
         const bluetoothPrinters          = ref([]);       // [{ name, address }]
         const isScanningBluetoothPrinters = ref(false);
         const selectedBluetoothPrinterInfo = ref(null);    // { name, address } | null
-        const wifiPrinterIp              = ref('');
+        const wifiPrinterIp              = ref('');        // legacy single-printer IP; preserved for migration + edge callers
+        const wifiPrinterPort            = ref(9100);     // raw TCP port; 9100 (JetDirect) is standard
+        // ── Wi-Fi multi-printer config ────────────────────────────────────────
+        // wifiPrinters is the shared list used by both single and multi modes:
+        //   { id, name, ip, port, copy_type: 'customer'|'company'|'both', active }
+        // Single mode: wifiSinglePrinterId picks one entry → prints customer only.
+        // Multi mode: every active entry is dispatched; copy_type decides which copies it gets.
+        const wifiPrinters               = ref([]);
+        const wifiMultiEnabled           = ref(false);
+        const wifiSinglePrinterId        = ref('');
+        const showWifiPrinterForm        = ref(false);
+        const editingWifiPrinterId       = ref(null);
+        const wifiPrinterForm            = ref({ name: '', ip: '', port: 9100, copy_type: 'both', category_ids: [] });
         const selectedPrinterType        = ref('');        // '' | 'bluetooth' | 'wifi' | 'sunmi'
         const sunmiPrinterAvailable      = ref(false);
         const sunmiDetectedModel         = ref('');        // model string injected by SunmiPrinterManager (e.g. 'V2', 'V3 Pro')
         const sunmiPaperWidthMm          = ref(58);       // 58 | 80 — matches paper roll installed
+        const companyCopyEnabled         = ref(false);     // prints a second kitchen-style ticket with modifiers after the customer copy, cut between
+        const settingsSubPage            = ref('main');    // 'main' | 'printer' — Settings page in-template sub-view
 
         // ── Settings tabs & printer CRUD ─────────────────────────────────────
         const settingsTab           = ref('general');
@@ -154,6 +168,7 @@ createApp({
         const editingIndex          = ref(null);
         const viewingSale           = ref(null);
         const lastReceipt           = ref(null);
+        const processingPayment     = ref(false);
         const searchInput           = ref(null);
         const scannerSearchTimer    = ref(null);
         const showClearCartConfirmModal = ref(false);
@@ -1320,6 +1335,7 @@ createApp({
                 sku:                  product.sku,
                 barcode:              product.barcode,
                 product_type:         product.product_type,
+                category_id:          product.category_id ?? null,
                 quantity:             1,
                 unit_price:           priceIncTax,
                 unit_price_exc_tax:   +unitPriceExc.toFixed(4),
@@ -2020,9 +2036,7 @@ createApp({
             pendingProductForModifier.value = product;
             tempModifierSelections.value    = {};
             (product.modifier_sets || []).forEach(set => {
-                if (set.options?.length) {
-                    tempModifierSelections.value[set.name] = set.options[0];
-                }
+                tempModifierSelections.value[set.name] = [];
             });
             showModifierModal.value = true;
         };
@@ -2030,11 +2044,14 @@ createApp({
         const confirmModifiers = () => {
             const product = pendingProductForModifier.value;
             if (!product) return;
-            const selected_modifiers = Object.entries(tempModifierSelections.value).map(([setName, opt]) => ({
-                modifier_set_name: setName,
-                option_name: opt.name,
-                price: +(opt.price || 0),
-            }));
+            const selected_modifiers = Object.entries(tempModifierSelections.value)
+                .flatMap(([setName, opts]) => (opts || []).map(opt => ({
+                    modifier_set_name: setName,
+                    option_name:       opt.name,
+                    price:             +(opt.price || 0),
+                    variation_id:      opt.variation_id   || null,
+                    set_product_id:    opt.set_product_id || null,
+                })));
             const modifierTotal = selected_modifiers.reduce((s, m) => s + m.price, 0);
             cart.value.push(buildCartItem(product, selected_modifiers, modifierTotal, null));
             showModifierModal.value           = false;
@@ -2424,6 +2441,7 @@ createApp({
 
         // Process payment from modal — always final regardless of status pill
         const processPayment = async () => {
+            if (processingPayment.value) return;
             if (!cart.value.length) return;
             if (!settings.value.locationId) { toast(t('select_location_first_error'), 'error'); return; }
             if (hasOpenRegister.value === false) {
@@ -2432,13 +2450,18 @@ createApp({
                 openOpenRegisterFlow({ silentIfBusy: true, force: true });
                 return;
             }
-            if (await blockSaleIfPhase2Offline()) return;
-            const tx = await buildFinalTransaction(payments.value);
-            await saveTransaction(tx);
-            showPaymentModal.value = false;
-            toast(t('payment_completed'), 'success');
-            printReceipt(lastReceipt.value, { silent: true });
-            if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
+            processingPayment.value = true;
+            try {
+                if (await blockSaleIfPhase2Offline()) return;
+                const tx = await buildFinalTransaction(payments.value);
+                await saveTransaction(tx);
+                showPaymentModal.value = false;
+                toast(t('payment_completed'), 'success');
+                printReceipt(lastReceipt.value, { silent: true });
+                if ((sublocation.value?.zatca_phase ?? 1) === 2) pushSales().catch(() => {});
+            } finally {
+                processingPayment.value = false;
+            }
         };
 
         // ════════════════════════════════════════════════════════════════════
@@ -2465,6 +2488,9 @@ createApp({
                     sale, settings.value, business.value, locations.value,
                     invoiceLayouts.value, targetWidthPx,
                 );
+                const companyCopyHtml = companyCopyEnabled.value
+                    ? buildMobileCompanyCopyHtml(sale, settings.value, business.value, locations.value, targetWidthPx)
+                    : null;
                 receipt = {
                     is_enabled: true,
                     print_type: 'browser',
@@ -2473,6 +2499,7 @@ createApp({
                     html_content: mobileHtml,
                     use_local_html: true,
                     thermal_width: targetWidthPx,
+                    company_copy_html_content: companyCopyHtml,
                 };
             } else {
                 receipt = getReceiptPayloadForSale(sale)
@@ -2515,13 +2542,93 @@ createApp({
                         bluetooth_printer_address: selectedBluetoothPrinterInfo.value.address,
                         bluetooth_printer_name: selectedBluetoothPrinterInfo.value.name || '',
                     };
-                } else if (selectedPrinterType.value === 'wifi' && wifiPrinterIp.value) {
-                    receipt = {
-                        ...receipt,
-                        print_type: 'wifi_android',
-                        wifi_printer_ip_address: wifiPrinterIp.value,
-                        wifi_printer_name: t('m_wifi_printer'),
-                    };
+                } else if (selectedPrinterType.value === 'wifi') {
+                    const activePrinters = wifiPrinters.value.filter((p) => p.active !== false && p.ip);
+                    const singlePrinter  = wifiPrinters.value.find((p) => p.id === wifiSinglePrinterId.value)
+                        || wifiPrinters.value.find((p) => !!p.ip);
+                    if (wifiMultiEnabled.value && activePrinters.length) {
+                        // Wi-Fi routing is per-printer (copy_type on each target), so the
+                        // global company-copy toggle doesn't apply here. Render the unfiltered
+                        // company copy only if some printer asks for it without a category
+                        // filter — category-filtered printers get their own per-combo PNG.
+                        const wifiWantsUnfilteredCompany = activePrinters.some(
+                            (p) => (p.copy_type === 'company' || p.copy_type === 'both')
+                                && !(Array.isArray(p.category_ids) && p.category_ids.length),
+                        );
+                        if (wifiWantsUnfilteredCompany && !receipt.company_copy_html_content) {
+                            const widthForCopy = sunmiPaperWidthMm.value === 80 ? 576 : 384;
+                            receipt = {
+                                ...receipt,
+                                company_copy_html_content: buildMobileCompanyCopyHtml(
+                                    sale, settings.value, business.value, locations.value, widthForCopy,
+                                ),
+                            };
+                        }
+                        // Category filtering: build per-combo company copy HTML so each
+                        // category-filtered printer gets only the items it cares about.
+                        const orderCategoryIds = [...new Set(
+                            (sale.items || [])
+                                .map((i) => i.category_id)
+                                .filter((id) => id != null && id !== '')
+                                .map((id) => String(id))
+                        )];
+                        const companyCatCombos = new Map();
+                        activePrinters
+                            .filter((p) => (p.copy_type === 'company' || p.copy_type === 'both')
+                                && Array.isArray(p.category_ids) && p.category_ids.length > 0)
+                            .forEach((p) => {
+                                const key = p.category_ids.map(String).sort().join(',');
+                                if (!companyCatCombos.has(key)) {
+                                    companyCatCombos.set(key, p.category_ids.map(String));
+                                }
+                            });
+                        const companyCopyHtmlByCategory = {};
+                        if (companyCatCombos.size) {
+                            const comboWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
+                            for (const [comboKey, catIds] of companyCatCombos) {
+                                const catItems = (sale.items || []).filter((i) => catIds.includes(String(i.category_id)));
+                                if (catItems.length > 0) {
+                                    const catSale = { ...sale, items: catItems };
+                                    companyCopyHtmlByCategory[comboKey] = buildMobileCompanyCopyHtml(
+                                        catSale, settings.value, business.value, locations.value, comboWidthPx,
+                                    );
+                                }
+                            }
+                        }
+                        receipt = {
+                            ...receipt,
+                            print_type: 'wifi_android_multi',
+                            wifi_printer_targets: activePrinters.map((p) => ({
+                                id:           p.id,
+                                name:         p.name,
+                                ip:           p.ip,
+                                port:         p.port || 9100,
+                                copy_type:    p.copy_type || 'both',
+                                category_ids: ((p.copy_type === 'company' || p.copy_type === 'both')
+                                    && Array.isArray(p.category_ids) && p.category_ids.length)
+                                    ? p.category_ids.map(String) : null,
+                            })),
+                            wifi_order_category_ids: orderCategoryIds,
+                            ...(Object.keys(companyCopyHtmlByCategory).length
+                                ? { company_copy_html_by_category: companyCopyHtmlByCategory }
+                                : {}),
+                            // Fallback IP/port for anything that reads the legacy single-printer fields.
+                            wifi_printer_ip_address: activePrinters[0].ip,
+                            wifi_printer_port:       activePrinters[0].port || 9100,
+                            wifi_printer_name:       t('m_wifi_printer'),
+                        };
+                    } else if (singlePrinter) {
+                        receipt = {
+                            ...receipt,
+                            print_type: 'wifi_android',
+                            wifi_printer_ip_address: singlePrinter.ip,
+                            wifi_printer_port: singlePrinter.port || 9100,
+                            wifi_printer_name: singlePrinter.name || t('m_wifi_printer'),
+                        };
+                    } else {
+                        if (!silent) toast(t('m_no_printer_selected') || 'No printer selected. Go to Settings → Printers to choose one.', 'error');
+                        return false;
+                    }
                 } else if (selectedPrinterType.value === 'sunmi' && sunmiPrinterAvailable.value) {
                     const sunmiWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
                     receipt = {
@@ -2772,9 +2879,37 @@ createApp({
             const mobilePrn = await db.settings.get('mobile_printer_config');
             if (mobilePrn?.data) {
                 selectedPrinterType.value = mobilePrn.data.type || '';
+                if (mobilePrn.data.wifiPort) wifiPrinterPort.value = parseInt(mobilePrn.data.wifiPort, 10) || 9100;
                 selectedBluetoothPrinterInfo.value = mobilePrn.data.bluetooth || null;
                 wifiPrinterIp.value = mobilePrn.data.wifiIp || '';
                 if (mobilePrn.data.sunmiPaperWidthMm) sunmiPaperWidthMm.value = mobilePrn.data.sunmiPaperWidthMm;
+                companyCopyEnabled.value = !!mobilePrn.data.companyCopy;
+                // Multi-printer config
+                wifiMultiEnabled.value    = !!mobilePrn.data.wifiMultiEnabled;
+                wifiSinglePrinterId.value = mobilePrn.data.wifiSinglePrinterId || '';
+                const stored = Array.isArray(mobilePrn.data.wifiPrinters) ? mobilePrn.data.wifiPrinters : [];
+                wifiPrinters.value = stored.map((p) => ({
+                    id:        p.id || ('wp-' + Date.now() + '-' + Math.floor(Math.random() * 1e6)),
+                    name:      p.name || p.ip || '',
+                    ip:        p.ip || '',
+                    port:      Number.isFinite(+p.port) && +p.port > 0 ? +p.port : 9100,
+                    copy_type: ['customer', 'company', 'both'].includes(p.copy_type) ? p.copy_type : 'both',
+                    category_ids: Array.isArray(p.category_ids) ? p.category_ids.map(String) : [],
+                    active:    p.active !== false,
+                }));
+                // Migrate legacy single wifiIp/wifiPort into one printer entry on first load.
+                if (!wifiPrinters.value.length && wifiPrinterIp.value) {
+                    const migrated = {
+                        id: 'wp-' + Date.now() + '-' + Math.floor(Math.random() * 1e6),
+                        name: wifiPrinterIp.value,
+                        ip: wifiPrinterIp.value,
+                        port: wifiPrinterPort.value || 9100,
+                        copy_type: 'both',
+                        active: true,
+                    };
+                    wifiPrinters.value = [migrated];
+                    wifiSinglePrinterId.value = migrated.id;
+                }
                 // Pre-populate the BT list with the saved printer so it shows as selected
                 // immediately on boot without requiring the user to scan first.
                 if (selectedBluetoothPrinterInfo.value?.address) {
@@ -2883,9 +3018,111 @@ createApp({
                     type: selectedPrinterType.value,
                     bluetooth: selectedBluetoothPrinterInfo.value,
                     wifiIp: wifiPrinterIp.value,
+                    wifiPort: wifiPrinterPort.value,
                     sunmiPaperWidthMm: sunmiPaperWidthMm.value,
+                    companyCopy: companyCopyEnabled.value,
+                    wifiMultiEnabled: wifiMultiEnabled.value,
+                    wifiSinglePrinterId: wifiSinglePrinterId.value,
+                    wifiPrinters: cloneForIdb(wifiPrinters.value),
                 },
             });
+        };
+
+        // ── Wi-Fi multi-printer CRUD ─────────────────────────────────────────
+        const setWifiSinglePrinter = async (id) => {
+            wifiSinglePrinterId.value = id || '';
+            const p = wifiPrinters.value.find((x) => x.id === id);
+            if (p) {
+                wifiPrinterIp.value   = p.ip || '';
+                wifiPrinterPort.value = p.port || 9100;
+            }
+            await persistMobilePrinterConfig();
+        };
+
+        const toggleWifiMultiPrinter = async (val) => {
+            wifiMultiEnabled.value = !!val;
+            await persistMobilePrinterConfig();
+        };
+
+        const toggleWifiPrinterActive = async (id) => {
+            wifiPrinters.value = wifiPrinters.value.map((p) =>
+                p.id === id ? { ...p, active: p.active === false } : p
+            );
+            await persistMobilePrinterConfig();
+        };
+
+        const openAddWifiPrinterForm = () => {
+            editingWifiPrinterId.value = null;
+            wifiPrinterForm.value = { name: '', ip: '', port: 9100, copy_type: 'both', category_ids: [] };
+            showWifiPrinterForm.value = true;
+        };
+
+        const openEditWifiPrinterForm = (p) => {
+            editingWifiPrinterId.value = p.id;
+            wifiPrinterForm.value = {
+                name:         p.name || '',
+                ip:           p.ip || '',
+                port:         p.port || 9100,
+                copy_type:    p.copy_type || 'both',
+                category_ids: Array.isArray(p.category_ids) ? p.category_ids.map(String) : [],
+            };
+            showWifiPrinterForm.value = true;
+        };
+
+        const toggleWifiPrinterFormCategory = (catId) => {
+            const key = String(catId);
+            const cur = Array.isArray(wifiPrinterForm.value.category_ids) ? wifiPrinterForm.value.category_ids.map(String) : [];
+            wifiPrinterForm.value.category_ids = cur.includes(key)
+                ? cur.filter((c) => c !== key)
+                : [...cur, key];
+        };
+
+        const closeWifiPrinterForm = () => {
+            showWifiPrinterForm.value = false;
+            editingWifiPrinterId.value = null;
+        };
+
+        const saveWifiPrinterForm = async () => {
+            const ip   = String(wifiPrinterForm.value.ip || '').trim();
+            const name = String(wifiPrinterForm.value.name || '').trim() || ip;
+            if (!ip) { toast(t('m_wifi_printer_ip') + ' *', 'error'); return; }
+            const portVal = parseInt(String(wifiPrinterForm.value.port || 9100), 10);
+            const port = (Number.isFinite(portVal) && portVal > 0 && portVal <= 65535) ? portVal : 9100;
+            const copy_type = ['customer', 'company', 'both'].includes(wifiPrinterForm.value.copy_type)
+                ? wifiPrinterForm.value.copy_type : 'both';
+            // Category filter only meaningful when this printer gets the company copy.
+            const category_ids = (copy_type !== 'customer' && Array.isArray(wifiPrinterForm.value.category_ids))
+                ? wifiPrinterForm.value.category_ids.map(String).filter(Boolean)
+                : [];
+
+            if (editingWifiPrinterId.value) {
+                wifiPrinters.value = wifiPrinters.value.map((p) =>
+                    p.id === editingWifiPrinterId.value
+                        ? { ...p, name, ip, port, copy_type, category_ids }
+                        : p
+                );
+            } else {
+                const id = 'wp-' + Date.now() + '-' + Math.floor(Math.random() * 1e6);
+                wifiPrinters.value = [...wifiPrinters.value, { id, name, ip, port, copy_type, category_ids, active: true }];
+                if (!wifiSinglePrinterId.value) wifiSinglePrinterId.value = id;
+            }
+            // Keep legacy single-IP mirror in sync with current single-mode selection.
+            const selected = wifiPrinters.value.find((p) => p.id === wifiSinglePrinterId.value);
+            if (selected) { wifiPrinterIp.value = selected.ip; wifiPrinterPort.value = selected.port; }
+            showWifiPrinterForm.value = false;
+            editingWifiPrinterId.value = null;
+            await persistMobilePrinterConfig();
+        };
+
+        const deleteWifiPrinter = async (id) => {
+            wifiPrinters.value = wifiPrinters.value.filter((p) => p.id !== id);
+            if (wifiSinglePrinterId.value === id) {
+                wifiSinglePrinterId.value = wifiPrinters.value[0]?.id || '';
+                const fallback = wifiPrinters.value[0];
+                wifiPrinterIp.value   = fallback?.ip || '';
+                wifiPrinterPort.value = fallback?.port || 9100;
+            }
+            await persistMobilePrinterConfig();
         };
 
         /** Ask the native Android shell to (re)send its paired-Bluetooth-device list. */
@@ -2906,13 +3143,30 @@ createApp({
 
         const saveWifiPrinterIp = async (ip) => {
             wifiPrinterIp.value = (ip || '').trim();
-            selectedPrinterType.value = wifiPrinterIp.value ? 'wifi' : (selectedBluetoothPrinterInfo.value ? 'bluetooth' : '');
+            await persistMobilePrinterConfig();
+        };
+
+        const saveWifiPrinterPort = async (port) => {
+            const parsed = parseInt(String(port || '').trim(), 10);
+            wifiPrinterPort.value = (Number.isFinite(parsed) && parsed > 0 && parsed <= 65535) ? parsed : 9100;
             await persistMobilePrinterConfig();
         };
 
         const saveSunmiPaperWidth = async (mm) => {
             const parsed = parseInt(mm);
             sunmiPaperWidthMm.value = (parsed === 80) ? 80 : 58;
+            await persistMobilePrinterConfig();
+        };
+
+        const toggleCompanyCopy = async (val) => {
+            companyCopyEnabled.value = !!val;
+            await persistMobilePrinterConfig();
+        };
+
+        /** Explicit print-method selector used by the Printer Settings sub-page. */
+        const setPrinterType = async (type) => {
+            const allowed = ['', 'bluetooth', 'wifi', 'sunmi'];
+            selectedPrinterType.value = allowed.includes(type) ? type : '';
             await persistMobilePrinterConfig();
         };
 
@@ -4770,8 +5024,27 @@ createApp({
             if (window.platformAPI?.isCapacitor?.()) {
                 if (selectedPrinterType.value === 'bluetooth' && selectedBluetoothPrinterInfo.value?.address) {
                     receipt = { ...receipt, print_type: 'bluetooth_android', bluetooth_printer_address: selectedBluetoothPrinterInfo.value.address, bluetooth_printer_name: selectedBluetoothPrinterInfo.value.name || '' };
-                } else if (selectedPrinterType.value === 'wifi' && wifiPrinterIp.value) {
-                    receipt = { ...receipt, print_type: 'wifi_android', wifi_printer_ip_address: wifiPrinterIp.value, wifi_printer_name: t('m_wifi_printer') };
+                } else if (selectedPrinterType.value === 'wifi') {
+                    const activePrinters = wifiPrinters.value.filter((p) => p.active !== false && p.ip);
+                    const singlePrinter  = wifiPrinters.value.find((p) => p.id === wifiSinglePrinterId.value)
+                        || wifiPrinters.value.find((p) => !!p.ip);
+                    if (wifiMultiEnabled.value && activePrinters.length) {
+                        receipt = {
+                            ...receipt,
+                            print_type: 'wifi_android_multi',
+                            wifi_printer_targets: activePrinters.map((p) => ({
+                                id: p.id, name: p.name, ip: p.ip, port: p.port || 9100,
+                                copy_type: p.copy_type || 'both',
+                            })),
+                            wifi_printer_ip_address: activePrinters[0].ip,
+                            wifi_printer_port:       activePrinters[0].port || 9100,
+                            wifi_printer_name:       t('m_wifi_printer'),
+                        };
+                    } else if (singlePrinter) {
+                        receipt = { ...receipt, print_type: 'wifi_android', wifi_printer_ip_address: singlePrinter.ip, wifi_printer_port: singlePrinter.port || 9100, wifi_printer_name: singlePrinter.name || t('m_wifi_printer') };
+                    } else {
+                        return;
+                    }
                 } else if (selectedPrinterType.value === 'sunmi' && sunmiPrinterAvailable.value) {
                     receipt = { ...receipt, print_type: 'sunmi_inner', thermal_width: targetWidthPx };
                 } else {
@@ -5136,7 +5409,7 @@ createApp({
             showCloseRegisterControl,
             showCloseRegisterModal, closeRegisterStep, closeRegisterMessage, closeRegisterSnapshot, closeRegisterForm,
             showOpenRegisterModal, openRegisterBusy, openRegisterError, openRegisterForm,
-            editingItem, editingIndex, viewingSale, lastReceipt,
+            editingItem, editingIndex, viewingSale, lastReceipt, processingPayment,
             searchFields, showSearchConfigModal, tileSize,
             showManualSearchModal, manualSearchQuery,
             manualSearchCategoryId, manualSearchBrandId, manualSearchQty,
@@ -5206,9 +5479,17 @@ createApp({
             // Mobile (Android) UI + printer picker
             mobileCartOpen, mobileProductViewMode,
             bluetoothPrinters, isScanningBluetoothPrinters, selectedBluetoothPrinterInfo,
-            wifiPrinterIp, selectedPrinterType, sunmiPrinterAvailable,
+            wifiPrinterIp, wifiPrinterPort, selectedPrinterType, sunmiPrinterAvailable,
             sunmiDetectedModel, sunmiPaperWidthMm, saveSunmiPaperWidth,
-            scanBluetoothPrinters, selectBluetoothPrinter, saveWifiPrinterIp,
+            scanBluetoothPrinters, selectBluetoothPrinter, saveWifiPrinterIp, saveWifiPrinterPort,
+            setPrinterType, settingsSubPage,
+            companyCopyEnabled, toggleCompanyCopy,
+            // Wi-Fi multi-printer
+            wifiPrinters, wifiMultiEnabled, wifiSinglePrinterId,
+            showWifiPrinterForm, editingWifiPrinterId, wifiPrinterForm,
+            setWifiSinglePrinter, toggleWifiMultiPrinter, toggleWifiPrinterActive,
+            openAddWifiPrinterForm, openEditWifiPrinterForm, closeWifiPrinterForm,
+            saveWifiPrinterForm, deleteWifiPrinter, toggleWifiPrinterFormCategory,
             // Settings tabs + printer CRUD
             settingsTab, localPrinters, printerPickerOptions,
             showPrinterFormModal, editingLocalPrinterId, printerForm,

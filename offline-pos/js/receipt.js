@@ -144,6 +144,17 @@ function lineTotal(item) {
     return gross - lineDisc(item);
 }
 
+function modifiersSummary(item) {
+    const mods = (item.selected_modifiers || []).filter(m => m.option_name);
+    if (!mods.length) return '';
+    return '(' + mods.map(m => m.option_name).join(', ') + ')';
+}
+
+function modifiersLineTotal(item) {
+    return (item.selected_modifiers || []).reduce((s, m) => s + (m.price || 0), 0)
+        * (parseFloat(item.quantity) || 1);
+}
+
 // slim2 (58mm thermal): single-column layout with flex numeric row
 function buildSlim2ItemsHtml(items, settings, hidePrices) {
     const f = makeFormatter();
@@ -162,6 +173,8 @@ function buildSlim2ItemsHtml(items, settings, hidePrices) {
         const total = lineTotal(item);
         const noteHtml = item.line_note ? `<br><span class="f-8">${item.line_note}</span>` : '';
         const discHtml = disc > 0 ? ` <span class="f-8"> - ${f(disc)}</span>` : '';
+        const modSummary = modifiersSummary(item);
+        const modHtml = !hidePrices && modSummary ? `<br><span class="f-8">${modSummary}</span>` : '';
         const numericRow = !hidePrices
             ? `<div class="slim2-numeric-row" dir="rtl">`
                 + `<span class="bw" style="white-space:nowrap;">${f(total)}</span>`
@@ -175,7 +188,7 @@ function buildSlim2ItemsHtml(items, settings, hidePrices) {
             + `<td class="description receipt-desc-text" style="text-align:right;">`
             + `<div style="display:flex;width:100%;justify-content:flex-start;flex-direction:row-reverse;">`
             + `<p class="m-0 mt-5" style="white-space:nowrap;text-align:right;">#${idx + 1}.&nbsp;</p>`
-            + `<p class="text-right m-0 mt-5" style="flex:1;text-align:right;">${item.name}${noteHtml}</p>`
+            + `<p class="text-right m-0 mt-5" style="flex:1;text-align:right;">${item.name}${noteHtml}${modHtml}</p>`
             + `</div>`
             + numericRow
             + `</td></tr>`;
@@ -204,13 +217,22 @@ function buildSlimItemsHtml(items, settings, hidePrices) {
                 + `</tr>`;
         }
         const unitPriceDisplay = item.unit_price_exc_tax ?? item.unit_price;
+        const modSummary = modifiersSummary(item);
+        const modRow = modSummary
+            ? `<tr>`
+                + `<td></td>`
+                + `<td class="description text-right receipt-desc-text" colspan="3"><span class="f-8">${modSummary}</span></td>`
+                + `<td class="price text-right"><span class="f-8">${f(modifiersLineTotal(item))}</span></td>`
+                + `</tr>`
+            : '';
         return `<tr>`
             + `<td class="serial_number" style="vertical-align:top;">${idx + 1}</td>`
             + `<td class="description text-right receipt-desc-text">${item.name}${noteHtml}${discNote}</td>`
             + `<td class="quantity text-right">${qtyCell}</td>`
             + `<td class="unit_price text-right">${f(unitPriceDisplay)}</td>`
             + `<td class="price text-right">${f(total)}</td>`
-            + `</tr>`;
+            + `</tr>`
+            + modRow;
     }).join('');
 }
 
@@ -228,6 +250,15 @@ function buildClassicItemsHtml(items, settings) {
         const note         = item.line_note
             ? `<br><small style="color:#555;">${t('receipt_note_prefix', { note: item.line_note })}</small>`
             : '';
+        const modSummary = modifiersSummary(item);
+        const modRow = modSummary
+            ? `<tr>`
+                + `<td style="border:1px solid #ccc;padding:8px 10px;text-align:center;">&nbsp;</td>`
+                + `<td style="border:1px solid #ccc;padding:8px 10px;width:${productColW}%;"><small>${modSummary}</small></td>`
+                + `<td style="border:1px solid #ccc;padding:8px 10px;" colspan="4">&nbsp;</td>`
+                + `<td style="border:1px solid #ccc;padding:8px 10px;text-align:right;">${f(modifiersLineTotal(item))}</td>`
+                + `</tr>`
+            : '';
         return `<tr>`
             + `<td style="border:1px solid #ccc;padding:8px 10px;text-align:center;vertical-align:top;width:${serialColW}%;word-wrap:break-word;overflow-wrap:break-word;">${idx + 1}</td>`
             + `<td style="border:1px solid #ccc;padding:8px 10px;vertical-align:top;width:${productColW}%;word-wrap:break-word;overflow-wrap:break-word;">`
@@ -237,7 +268,8 @@ function buildClassicItemsHtml(items, settings) {
             + `<td style="border:1px solid #ccc;padding:8px 10px;text-align:right;vertical-align:top;width:${colW}%;word-wrap:break-word;">${f(disc)}</td>`
             + `<td style="border:1px solid #ccc;padding:8px 10px;text-align:right;vertical-align:top;width:${colW}%;word-wrap:break-word;">${f(taxPerUnit)}</td>`
             + `<td style="border:1px solid #ccc;padding:8px 10px;text-align:right;vertical-align:top;width:${colW}%;word-wrap:break-word;">${f(total)}</td>`
-            + `</tr>`;
+            + `</tr>`
+            + modRow;
     }).join('');
 }
 
@@ -253,13 +285,23 @@ function buildElegantItemsHtml(items, settings) {
         const note        = item.line_note
             ? `<br><small>${item.line_note}</small>`
             : '';
+        const modSummary = modifiersSummary(item);
+        const modRow = modSummary
+            ? `<tr>`
+                + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:center;">&nbsp;</td>`
+                + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:right;"><small>${modSummary}</small></td>`
+                + `<td style="border:1px solid #ccc;padding:6px 8px;" colspan="2">&nbsp;</td>`
+                + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:right;">${f(modifiersLineTotal(item))}</td>`
+                + `</tr>`
+            : '';
         return `<tr>`
             + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:center;">${idx + 1}</td>`
             + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:right;">${item.name}${note}</td>`
             + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:right;">${fQty(item.quantity)}</td>`
             + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:right;">${f(unitPriceExc)}</td>`
             + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:right;">${f(totalExc)}</td>`
-            + `</tr>`;
+            + `</tr>`
+            + modRow;
     }).join('');
 }
 
@@ -275,6 +317,15 @@ function buildDetailedItemsHtml(items, settings) {
         const note         = item.line_note
             ? `<br><small class="text-muted">${item.line_note}</small>`
             : '';
+        const modSummary = modifiersSummary(item);
+        const modRow = modSummary
+            ? `<tr>`
+                + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:center;">&nbsp;</td>`
+                + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:right;"><small>${modSummary}</small></td>`
+                + `<td style="border:1px solid #ccc;padding:6px 8px;" colspan="6">&nbsp;</td>`
+                + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:right;">${f(modifiersLineTotal(item))}</td>`
+                + `</tr>`
+            : '';
         return `<tr>`
             + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:center;">${idx + 1}</td>`
             + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:right;">${item.name}${note}</td>`
@@ -285,7 +336,8 @@ function buildDetailedItemsHtml(items, settings) {
             + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:right;">${f(taxPerUnit)}</td>`
             + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:right;">${f(unitPriceInc)}</td>`
             + `<td style="border:1px solid #ccc;padding:6px 8px;text-align:right;">${f(total)}</td>`
-            + `</tr>`;
+            + `</tr>`
+            + modRow;
     }).join('');
 }
 
@@ -299,6 +351,15 @@ function buildColumnizeTaxesItemsHtml(items, settings) {
         const note         = item.line_note
             ? `<br><small class="text-muted">${item.line_note}</small>`
             : '';
+        const modSummary = modifiersSummary(item);
+        const modRow = modSummary
+            ? `<tr>`
+                + `<td class="text-center">&nbsp;</td>`
+                + `<td class="text-right" style="word-break:break-all;"><small>${modSummary}</small></td>`
+                + `<td class="text-right" colspan="3">&nbsp;</td>`
+                + `<td class="text-right">${f(modifiersLineTotal(item))}</td>`
+                + `</tr>`
+            : '';
         return `<tr>`
             + `<td class="text-center">${idx + 1}</td>`
             + `<td class="text-right" style="word-break:break-all;">${item.name}${note}</td>`
@@ -306,7 +367,8 @@ function buildColumnizeTaxesItemsHtml(items, settings) {
             + `<td class="text-right">${f(unitPriceExc)}</td>`
             + `<td class="text-right">${f(taxableValue)}</td>`
             + `<td class="text-right">${f(total)}</td>`
-            + `</tr>`;
+            + `</tr>`
+            + modRow;
     }).join('');
 }
 
@@ -651,13 +713,15 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
             const total     = lineTotal(item);
             const qty       = fQty(item.quantity);
             const noteHtml  = item.line_note ? `<div class="item-note">${item.line_note}</div>` : '';
+            const modSummary = modifiersSummary(item);
+            const modHtml = !hidePrices && modSummary ? `<div class="item-note">${modSummary}</div>` : '';
             const row1 = hidePrices
                 ? `<div class="row"><span class="right name">${item.name}</span></div>`
                 : `<div class="row"><span class="right name">${item.name}</span><span class="left total">${f(total)}</span></div>`;
             const row2 = hidePrices
                 ? `<div class="row sub"><span class="right sub-text">${qty}</span></div>`
                 : `<div class="row sub"><span class="right sub-text">${qty} × ${f(unitPrice)}</span></div>`;
-            return `<div class="item">${row1}${row2}${noteHtml}</div>`;
+            return `<div class="item">${row1}${row2}${noteHtml}${modHtml}</div>`;
         }).join('');
     } else {
         const thStyle  = `font-size:${baseFont};padding:10px 4px;`;
@@ -693,9 +757,11 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
                     <td style="text-align:center;${tdStyle}">${qty}</td>
                 </tr>`;
             }
+            const modSummary = modifiersSummary(item);
+            const modNote = modSummary ? `<br><span style="font-size:${smallFont};font-weight:600;">${modSummary}</span>` : '';
             return `<tr style="border-bottom:1px dashed #000;">
                 <td style="text-align:center;${tdStyle}padding-left:2px;padding-right:2px;">${idx + 1}</td>
-                <td style="text-align:right;${tdStyle}">${item.name}${discNote}${noteHtml}</td>
+                <td style="text-align:right;${tdStyle}">${item.name}${discNote}${noteHtml}${modNote}</td>
                 <td style="text-align:center;${tdStyle}font-weight:800;">${qty}</td>
                 <td style="text-align:left;${tdStyle}white-space:nowrap;direction:ltr;">${f(unitPriceDisplay)}</td>
                 <td style="text-align:left;${tdStyle}white-space:nowrap;direction:ltr;font-weight:900;">${f(total)}</td>
@@ -802,6 +868,139 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
         + `</div>`;
 
     return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>${css}</style></head><body>${body}</body></html>`;
+}
+
+// ─── Kitchen-style COMPANY COPY (second receipt) ─────────────────────────────
+// Design mirrors pos-offline's buildKitchenCompanyCopyTicketHtml: small centered
+// title ("نسخة الشركة"), customer name inline underneath, invoice no + date in a
+// top-bordered box, and a 3-col items table (# / name+notes+modifiers / qty).
+// Qty is a pre-rasterized rounded black PNG pill with a white digit — this is
+// the kitchen-ticket signature. Rendering as PNG avoids html2canvas's RTL
+// table-cell layout bugs (same lesson as the QR fix). Fonts sized up ~2.5× from
+// pos-offline's screen CSS so thermal output is legible after html2canvas scale.
+function buildMobileCompanyCopyHtml(sale, settings, business, locations, thermalWidthPx) {
+    const is58mm = (thermalWidthPx || 384) <= 400;
+
+    const invoiceNo = sale.server_invoice_no || sale.invoice_no || '';
+    const invoiceDate = new Date(sale.created_at).toLocaleString('ar-SA', {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', hour12: false,
+    });
+    const cashCustomerLabel = t('receipt_cash_customer');
+    const customerName = (sale.customer_name || cashCustomerLabel)
+        .replace('Walk-In Customer', cashCustomerLabel)
+        .replace('Walk In Customer', cashCustomerLabel);
+
+    const titleFont = is58mm ? '34px' : '42px';
+    const baseFont  = is58mm ? '26px' : '32px';
+    const rowFont   = is58mm ? '24px' : '30px';
+    const smallFont = is58mm ? '20px' : '26px';
+
+    const rows = (sale.items || []).map((item, idx) => {
+        const noteHtml = item.line_note
+            ? `<br><span style="font-size:${smallFont};">${item.line_note}</span>` : '';
+        const modSummary = modifiersSummary(item);
+        const modHtml = modSummary
+            ? `<br><span style="font-size:${smallFont};">${modSummary}</span>` : '';
+        const qtyBadge = buildCompanyCopyQtyBadge(fQty(item.quantity), is58mm);
+        const cell = `padding:6px 4px;font-size:${rowFont};line-height:1.4;`;
+        return `<tr>`
+            + `<td style="${cell}text-align:right;vertical-align:top;width:12%;">${idx + 1}</td>`
+            + `<td style="${cell}text-align:right;vertical-align:top;">${item.name}${noteHtml}${modHtml}</td>`
+            + `<td style="${cell}text-align:center;vertical-align:middle;width:24%;">${qtyBadge}</td>`
+            + `</tr>`;
+    }).join('');
+
+    const theadCell = `padding:6px 4px;font-size:${baseFont};`;
+    const theadHtml = `<thead><tr style="border-bottom:1px solid #000;">`
+        + `<th style="${theadCell}text-align:right;width:12%;">#</th>`
+        + `<th style="${theadCell}text-align:right;">${t('receipt_item') || 'المنتج'}</th>`
+        + `<th style="${theadCell}text-align:center;width:24%;">${t('receipt_qty') || 'الكمية'}</th>`
+        + `</tr></thead>`;
+
+    const tableHtml = `<table style="width:100%;border-collapse:collapse;direction:rtl;font-weight:700;">`
+        + theadHtml + `<tbody>${rows}</tbody></table>`;
+
+    // Header: centered title, customer name under it, then an invoice info block
+    // with a top border separating it from the title. Mirrors pos-offline's
+    // .textbox-info rows (invoice no, date) as two-column flex rows.
+    const infoRow = (label, value) => value
+        ? `<div style="display:flex;justify-content:space-between;align-items:baseline;margin:4px 0;direction:rtl;font-size:${baseFont};">`
+            + `<span style="font-weight:800;">${label}</span>`
+            + `<span style="font-weight:700;direction:ltr;">${value}</span>`
+          + `</div>`
+        : '';
+
+    const headerHtml = ''
+        + `<div style="text-align:center;margin:0 0 ${is58mm ? '6px' : '10px'};">`
+            + `<div style="font-size:${titleFont};font-weight:900;-webkit-text-stroke:0.5px #000;">${t('company_copy')}</div>`
+            + (customerName
+                ? `<div style="font-size:${baseFont};font-weight:700;margin-top:4px;">`
+                    + `${t('receipt_customer_label') || 'العميل'} <span>${customerName}</span>`
+                  + `</div>`
+                : '')
+        + `</div>`
+        + `<div style="border-top:1px solid #000;padding-top:${is58mm ? '6px' : '8px'};margin-bottom:${is58mm ? '6px' : '8px'};">`
+            + infoRow(t('receipt_invoice_no') || 'رقم الفاتورة', invoiceNo)
+            + infoRow(t('receipt_date') || 'التاريخ', invoiceDate)
+        + `</div>`;
+
+    const bodyWidth = thermalWidthPx + 'px';
+    const css = `
+        body,html{margin:0;padding:0;background:#fff}
+        .rcp,.rcp *{box-sizing:border-box;color:#000;-webkit-text-stroke:0.3px #000}
+        .rcp{width:${bodyWidth};max-width:${bodyWidth};font-family:'Tahoma','Arial',sans-serif;line-height:1.4;padding:${is58mm ? '6px' : '10px'};direction:rtl;text-align:right;font-weight:700;background:#fff}
+    `.replace(/\s+/g, ' ');
+
+    const body = `<div class="rcp" dir="rtl">${headerHtml}${tableHtml}</div>`;
+    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>${css}</style></head><body>${body}</body></html>`;
+}
+
+// Renders the company-copy quantity badge as a pre-rasterized PNG <img> — a
+// rounded black pill with a centered white digit. Ported from pos-offline:
+// nested inline-block spans in RTL table cells get mispositioned by
+// html2canvas, so pre-rasterizing to a PNG means capture just blits pixels.
+function buildCompanyCopyQtyBadge(qtyText, is58mm) {
+    const label = String(qtyText == null ? '' : qtyText);
+    try {
+        const scale  = 4;                       // super-sample for crisp thermal output
+        const h      = is58mm ? 24 : 30;        // CSS px height (thermal-scaled vs pos-offline's 16px screen size)
+        const padX   = is58mm ? 7  : 9;
+        const fontPx = is58mm ? 18 : 22;
+        const measureCtx = document.createElement('canvas').getContext('2d');
+        measureCtx.font = `800 ${fontPx}px Arial, Helvetica, "Segoe UI", sans-serif`;
+        const textW = Math.ceil(measureCtx.measureText(label).width);
+        const w = Math.max(h, textW + padX * 2);
+
+        const canvas = document.createElement('canvas');
+        canvas.width  = w * scale;
+        canvas.height = h * scale;
+        const ctx = canvas.getContext('2d');
+        ctx.scale(scale, scale);
+
+        // Pill
+        const r = h / 2;
+        ctx.fillStyle = '#000';
+        ctx.beginPath();
+        ctx.moveTo(r, 0);
+        ctx.lineTo(w - r, 0);
+        ctx.arc(w - r, r, r, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(r, h);
+        ctx.arc(r, r, r, Math.PI / 2, -Math.PI / 2);
+        ctx.closePath();
+        ctx.fill();
+
+        // Digit
+        ctx.fillStyle = '#fff';
+        ctx.font = `800 ${fontPx}px Arial, Helvetica, "Segoe UI", sans-serif`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(label, w / 2, h / 2 + 1);
+
+        return `<img class="company-copy-qty-badge-img" alt="qty" src="${canvas.toDataURL('image/png')}" style="display:inline-block;vertical-align:middle;width:${w}px;height:${h}px;">`;
+    } catch (e) {
+        return `<span style="display:inline-block;background:#000;color:#fff;border-radius:999px;padding:2px 10px;font-weight:800;">${label}</span>`;
+    }
 }
 
 // ─── Close-register Z-report receipt ─────────────────────────────────────────

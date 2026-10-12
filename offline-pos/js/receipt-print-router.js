@@ -45,6 +45,9 @@
             if (type === 'wifi_android' && typeof tray.printViaAndroidWifiBridge === 'function') {
                 return tray.printViaAndroidWifiBridge(receipt);
             }
+            if (type === 'wifi_android_multi' && typeof tray.printViaAndroidWifiMultiBridge === 'function') {
+                return tray.printViaAndroidWifiMultiBridge(receipt);
+            }
             if (type === 'sunmi_inner' && typeof tray.printViaSunmiAndroidBridge === 'function') {
                 return tray.printViaSunmiAndroidBridge(receipt);
             }

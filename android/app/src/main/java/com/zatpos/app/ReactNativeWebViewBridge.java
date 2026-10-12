@@ -17,6 +17,7 @@ public class ReactNativeWebViewBridge {
     private final Context context;
     private final BluetoothPrinterManager btManager;
     private final SunmiPrinterManager sunmiManager;
+    private final WifiPrinterManager wifiManager;
     private final Bridge bridge;
 
     public ReactNativeWebViewBridge(Context context, Bridge bridge) {
@@ -24,6 +25,7 @@ public class ReactNativeWebViewBridge {
         this.bridge = bridge;
         this.btManager = new BluetoothPrinterManager(context, bridge);
         this.sunmiManager = new SunmiPrinterManager(context, bridge);
+        this.wifiManager = new WifiPrinterManager(context, bridge);
         sunmiManager.init();
     }
 
@@ -49,6 +51,13 @@ public class ReactNativeWebViewBridge {
                     break;
                 case "sunmi_inner_print_receipt":
                     sunmiManager.handlePrintReceipt(msg);
+                    break;
+                case "wifi_print_escpos":
+                case "wifi_print_receipt":
+                    wifiManager.handlePrintReceipt(msg);
+                    break;
+                case "wifi_print_multi":
+                    wifiManager.handlePrintReceiptMulti(msg);
                     break;
                 case "get_bluetooth_printers":
                 case "request_bluetooth_scan":
@@ -101,12 +110,12 @@ public class ReactNativeWebViewBridge {
 
                 int fileLength = conn.getContentLength();
                 File apkFile = new File(context.getCacheDir(), "zat_update.apk");
+                long totalRead = 0;
 
                 try (InputStream input = conn.getInputStream();
                      FileOutputStream output = new FileOutputStream(apkFile)) {
                     byte[] buffer = new byte[8192];
                     int bytesRead;
-                    long totalRead = 0;
                     int lastReported = -1;
 
                     while ((bytesRead = input.read(buffer)) != -1) {
@@ -122,13 +131,19 @@ public class ReactNativeWebViewBridge {
                     }
                 }
 
+                if (fileLength > 0 && totalRead != fileLength) {
+                    throw new Exception("Download incomplete: received " + totalRead + " of " + fileLength + " bytes");
+                }
+
                 // Validate APK magic bytes (ZIP: PK\x03\x04)
                 try (java.io.RandomAccessFile raf = new java.io.RandomAccessFile(apkFile, "r")) {
                     if (raf.length() < 4) throw new Exception("Downloaded file too small (" + raf.length() + " bytes)");
                     byte[] magic = new byte[2];
                     raf.read(magic);
                     if (magic[0] != 0x50 || magic[1] != 0x4B) {
-                        throw new Exception("Downloaded file is not a valid APK (bad magic bytes)");
+                        throw new Exception("Not a valid APK — bad magic bytes (got 0x"
+                                + String.format("%02X", magic[0]) + " 0x" + String.format("%02X", magic[1])
+                                + ", file size " + raf.length() + " bytes)");
                     }
                 }
 

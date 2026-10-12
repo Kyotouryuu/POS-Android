@@ -46,7 +46,17 @@
       "Bash(grep -v \"^\\\\s*//\")",
       "Bash(xxd \"/c/Users/Kyo/Downloads/app-debug \\(8\\).apk\")",
       "Bash(python3 -c ' *)",
-      "Bash(xxd /tmp/test.apk)"
+      "Bash(xxd /tmp/test.apk)",
+      "Bash(./gradlew :app:compileDebugJavaWithJavac -q)",
+      "Bash(node --check \"C:/Users/Kyo/OneDrive/Desktop/Zat code/ZatERP/POS-Android/offline-pos/js/receipt.js\")",
+      "Bash(node --check \"C:/Users/Kyo/OneDrive/Desktop/Zat code/ZatERP/POS-Android/offline-pos/js/app.js\")",
+      "Bash(node --check \"C:/Users/Kyo/OneDrive/Desktop/Zat code/ZatERP/POS-Android/offline-pos/js/printer.js\")",
+      "Bash(node --check offline-pos/js/app.js)",
+      "Bash(node --check offline-pos/js/i18n.js)",
+      "Bash(./gradlew compileDebugJavaWithJavac)",
+      "Bash(node --check offline-pos/js/printer.js)",
+      "Bash(node --check offline-pos/js/receipt-print-router.js)",
+      "Bash(node --check offline-pos/js/receipt.js)"
     ]
   }
 }

@@ -1201,14 +1201,61 @@ async function captureReceiptImage(receipt) {
 
 /**
  * PNG + GS v 0 raster ESC/POS (base64) for Wi‑Fi thermal when the server sends slim HTML + QR/barcode-only commands.
+ * When receipt.company_copy_html_content is present, returns a raster_png_base64_list of [customer, companyCopy]
+ * so the native bridge prints them as separate jobs with a feed+cut between (kitchen-ticket style).
  */
 async function captureReceiptWifiThermalPayloads(receipt) {
     var tw = (receipt && receipt.thermal_width && receipt.thermal_width >= 200)
         ? parseInt(receipt.thermal_width) : BLUETOOTH_THERMAL_WIDTH;
-    var resizedCanvas = await renderReceiptToThermalCanvas(receipt, tw);
-    var png = resizedCanvas.toDataURL('image/png').replace(/^data:image\/png;base64,/, '');
-    var escpos = uint8ToBase64EscPos(escPosGsV0RasterFromCanvas(resizedCanvas));
-    return { raster_png_base64: png, escpos_base64: escpos, thermal_width: tw };
+    var canvasToPng = function(c) { return c.toDataURL('image/png').replace(/^data:image\/png;base64,/, ''); };
+
+    var mainCanvas = await renderReceiptToThermalCanvas(receipt, tw);
+    var mainPng = canvasToPng(mainCanvas);
+
+    var companyCopyHtml = receipt && receipt.company_copy_html_content;
+    var pngByCopy = { customer: mainPng, company: null };
+    if (companyCopyHtml) {
+        try {
+            var copyCanvas = await renderReceiptToThermalCanvas({ html_content: companyCopyHtml, thermal_width: tw }, tw);
+            pngByCopy.company = canvasToPng(copyCanvas);
+        } catch (e) {
+            console.warn('Company copy render failed, printing customer copy only', e);
+        }
+    }
+
+    // Per-combo filtered company copies for category-filtered Wi-Fi printers.
+    // Keyed by sorted category IDs joined by ','; absence of a key = no items in
+    // that combo and the printer should be skipped at dispatch time.
+    var companyCopyHtmlByCategory = receipt && receipt.company_copy_html_by_category;
+    if (companyCopyHtmlByCategory && typeof companyCopyHtmlByCategory === 'object') {
+        var comboKeys = Object.keys(companyCopyHtmlByCategory);
+        for (var ci = 0; ci < comboKeys.length; ci += 1) {
+            var comboKey = comboKeys[ci];
+            try {
+                var catCanvas = await renderReceiptToThermalCanvas(
+                    { html_content: companyCopyHtmlByCategory[comboKey], thermal_width: tw }, tw);
+                pngByCopy['company_cats_' + comboKey] = canvasToPng(catCanvas);
+            } catch (e) {
+                console.warn('Combo company copy render failed for', comboKey, e);
+            }
+        }
+    }
+
+    if (pngByCopy.company) {
+        return {
+            raster_png_base64_list: [mainPng, pngByCopy.company],
+            png_by_copy: pngByCopy,
+            thermal_width: tw,
+        };
+    }
+
+    var escpos = uint8ToBase64EscPos(escPosGsV0RasterFromCanvas(mainCanvas));
+    return {
+        raster_png_base64: mainPng,
+        escpos_base64: escpos,
+        png_by_copy: pngByCopy,
+        thermal_width: tw,
+    };
 }
 
 function printDebugLog() {}
@@ -1852,10 +1899,15 @@ function printViaAndroidWifiBridge(receipt) {
 
         if (receipt && receipt.use_local_html && htmlContent) {
             var wifiLocalTw = receipt.thermal_width || BLUETOOTH_THERMAL_WIDTH;
-            return captureReceiptWifiThermalPayloads({ html_content: htmlContent, thermal_width: wifiLocalTw }).then(function(payloads) {
+            return captureReceiptWifiThermalPayloads({
+                html_content: htmlContent,
+                thermal_width: wifiLocalTw,
+                company_copy_html_content: receipt.company_copy_html_content || null,
+            }).then(function(payloads) {
                 sendPayload(buildWifiEscposMessage(requestId, name, ipAddress, portNum, {
                     escpos_base64: payloads.escpos_base64,
                     raster_png_base64: payloads.raster_png_base64,
+                    raster_png_base64_list: payloads.raster_png_base64_list,
                     thermal_width: payloads.thermal_width || wifiLocalTw
                 }), { status: 'Client-rendered local thermal HTML sent to Wi-Fi printer', source: 'local-html' });
             }).catch(function(capErr) {
@@ -2118,6 +2170,139 @@ function printViaAndroidWifiBridge(receipt) {
     });
 }
 
+/**
+ * Multi-host Wi-Fi print bridge. Expects receipt.wifi_printer_targets:
+ *   [{ id, name, ip, port, copy_type: 'customer'|'company'|'both' }]
+ * Captures the receipt (and company copy if receipt.company_copy_html_content is set)
+ * once, then builds a `targets` payload matching each printer's copy_type to the
+ * corresponding PNG(s), and dispatches a single `wifi_print_multi` message. The native
+ * side fans out one TCP job per target concurrently.
+ */
+function printViaAndroidWifiMultiBridge(receipt) {
+    return new Promise(function(resolve, reject) {
+        if (!isAndroidBridgeAvailable()) {
+            reject(new Error('Android bridge is not available.'));
+            return;
+        }
+        var targets = receipt && Array.isArray(receipt.wifi_printer_targets) ? receipt.wifi_printer_targets : [];
+        if (!targets.length) {
+            reject(new Error('No Wi-Fi printer targets provided.'));
+            return;
+        }
+        var htmlContent = receipt && receipt.html_content ? receipt.html_content : '';
+        if (!htmlContent) {
+            reject(new Error('Receipt HTML content is required for Wi-Fi multi print.'));
+            return;
+        }
+
+        window.__bluetoothPrintActive = true;
+        var requestId = 'android-wifi-multi-' + Date.now() + '-' + Math.floor(Math.random() * 100000);
+        var timeout = null;
+        var tw = receipt.thermal_width || BLUETOOTH_THERMAL_WIDTH;
+
+        function clearActiveLater() {
+            setTimeout(function() { window.__bluetoothPrintActive = false; }, 2500);
+        }
+
+        function onBridgeResult(event) {
+            var detail = event && event.detail ? event.detail : {};
+            if (!detail.requestId || detail.requestId !== requestId) return;
+            clearTimeout(timeout);
+            window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+            clearActiveLater();
+            if (detail.success === false) {
+                reject(new Error(detail.error || detail.message || 'Wi-Fi multi print failed.'));
+                return;
+            }
+            resolve(detail);
+        }
+
+        var orderCategoryIds = receipt && Array.isArray(receipt.wifi_order_category_ids)
+            ? receipt.wifi_order_category_ids.map(String) : [];
+
+        captureReceiptWifiThermalPayloads({
+            html_content: htmlContent,
+            thermal_width: tw,
+            company_copy_html_content: receipt.company_copy_html_content || null,
+            company_copy_html_by_category: receipt.company_copy_html_by_category || null,
+        }).then(function(payloads) {
+            var pngByCopy = payloads.png_by_copy || { customer: payloads.raster_png_base64 || null, company: null };
+            // Fall back: if the company copy wasn't rendered (feature off), route 'company'
+            // targets to the customer PNG rather than silently dropping them. The user will
+            // see the customer receipt on those printers, which is less surprising than
+            // "nothing happened at this printer."
+            if (!pngByCopy.customer && pngByCopy.company) pngByCopy.customer = pngByCopy.company;
+            if (!pngByCopy.company  && pngByCopy.customer) pngByCopy.company  = pngByCopy.customer;
+            if (!pngByCopy.customer) {
+                reject(new Error('Receipt render produced no printable PNG.'));
+                return;
+            }
+
+            function pickCompanyPngForTarget(targetCatIds) {
+                if (!targetCatIds || !targetCatIds.length) return pngByCopy.company;
+                var comboKey = targetCatIds.slice().sort().join(',');
+                var comboPng = pngByCopy['company_cats_' + comboKey];
+                if (comboPng) return comboPng;
+                // No combo PNG rendered: order likely had no items in these categories.
+                // If we can confirm that from orderCategoryIds, drop this target entirely.
+                if (orderCategoryIds.length > 0
+                    && !targetCatIds.some(function(c) { return orderCategoryIds.indexOf(String(c)) !== -1; })) {
+                    return null;
+                }
+                return pngByCopy.company;
+            }
+
+            var nativeTargets = [];
+            targets.forEach(function(t) {
+                var host = String(t.ip || t.ip_address || t.host || '').trim();
+                if (!host) return;
+                var port = Number.isFinite(+t.port) && +t.port > 0 ? +t.port : 9100;
+                var copyType = t.copy_type || 'both';
+                var catIds = Array.isArray(t.category_ids) && t.category_ids.length
+                    ? t.category_ids.map(String) : null;
+                var pngs = [];
+                if (copyType === 'customer') {
+                    pngs = [pngByCopy.customer];
+                } else if (copyType === 'company') {
+                    pngs = [pickCompanyPngForTarget(catIds)];
+                } else {
+                    var companyForBoth = pickCompanyPngForTarget(catIds);
+                    if (companyForBoth && companyForBoth !== pngByCopy.customer) {
+                        pngs = [pngByCopy.customer, companyForBoth];
+                    } else {
+                        pngs = [pngByCopy.customer];
+                    }
+                }
+                pngs = pngs.filter(Boolean);
+                if (!pngs.length) return;
+                nativeTargets.push({ host: host, port: port, pngBase64List: pngs });
+            });
+
+            if (!nativeTargets.length) {
+                reject(new Error('No Wi-Fi target matched the available receipt copies.'));
+                return;
+            }
+
+            window.addEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+            timeout = setTimeout(function() {
+                window.removeEventListener(ANDROID_BRIDGE_EVENT_NAME, onBridgeResult);
+                clearActiveLater();
+                resolve({ requestId: requestId, status: 'sent' });
+            }, 20000);
+
+            window.ReactNativeWebView.postMessage(JSON.stringify({
+                type: 'wifi_print_multi',
+                requestId: requestId,
+                thermal_width: tw,
+                targets: nativeTargets,
+            }));
+        }).catch(function(err) {
+            window.__bluetoothPrintActive = false;
+            reject(err);
+        });
+    });
+}
+
 function printViaSunmiAndroidBridge(receipt) {
     return new Promise(function(resolve, reject) {
         if (!isAndroidBridgeAvailable()) {
@@ -2275,4 +2460,5 @@ window.printerTray.requestUsbPrintersOnLoad = requestUsbPrintersOnLoad;
 window.printerTray.printViaAndroidBridge = printViaAndroidBridge;
 window.printerTray.printViaAndroidUsbBridge = printViaAndroidUsbBridge;
 window.printerTray.printViaAndroidWifiBridge = printViaAndroidWifiBridge;
+window.printerTray.printViaAndroidWifiMultiBridge = printViaAndroidWifiMultiBridge;
 window.printerTray.printViaSunmiAndroidBridge = printViaSunmiAndroidBridge;

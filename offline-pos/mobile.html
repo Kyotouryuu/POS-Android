@@ -260,7 +260,7 @@
                 <i class="fas m-nav-icon" :class="showCloseRegisterControl ? 'fa-lock-open' : 'fa-lock'"></i>
                 <span>{{ t('m_nav_register') }}</span>
             </button>
-            <button @click="currentPage = 'settings'; sideNavCollapsed = true" class="m-nav-item" :class="currentPage === 'settings' ? 'is-active' : ''">
+            <button @click="currentPage = 'settings'; settingsSubPage = 'main'; sideNavCollapsed = true" class="m-nav-item" :class="currentPage === 'settings' ? 'is-active' : ''">
                 <i class="fas fa-sliders m-nav-icon"></i>
                 <span>{{ t('m_nav_more') }}</span>
             </button>
@@ -585,8 +585,8 @@
         </div>
       </template>
 
-      <!-- ════════ SETTINGS PAGE ════════ -->
-      <template v-else-if="currentPage === 'settings'">
+      <!-- ════════ SETTINGS PAGE (main view) ════════ -->
+      <template v-else-if="currentPage === 'settings' && settingsSubPage === 'main'">
         <div class="px-4 py-3 bg-white border-b border-slate-100 flex-shrink-0">
             <h3 class="font-bold text-slate-800">{{ t('m_settings_title') }}</h3>
         </div>
@@ -683,77 +683,28 @@
                 </template>
             </section>
 
-            <!-- Printer picker -->
-            <section class="space-y-3">
+            <!-- Printer (opens dedicated sub-page) -->
+            <section class="space-y-2">
                 <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_printers_section') }}</div>
-                <div class="rounded-xl border border-slate-200 px-4 py-3 bg-slate-50">
-                    <div class="text-[11px] text-slate-400 mb-0.5">{{ t('m_selected_printer') }}</div>
-                    <div class="text-sm font-semibold text-slate-700">
-                        <template v-if="selectedPrinterType === 'sunmi' && sunmiPrinterAvailable">
-                            <i class="fas fa-print text-amber-500 me-1"></i>{{ t('m_sunmi_inner_printer') }}
-                        </template>
-                        <template v-else-if="selectedPrinterType === 'bluetooth' && selectedBluetoothPrinterInfo">
-                            <i class="fab fa-bluetooth-b text-amber-500 me-1"></i>{{ selectedBluetoothPrinterInfo.name || selectedBluetoothPrinterInfo.address }}
-                        </template>
-                        <template v-else-if="selectedPrinterType === 'wifi' && wifiPrinterIp">
-                            <i class="fas fa-wifi text-amber-500 me-1"></i>{{ wifiPrinterIp }}
-                        </template>
-                        <template v-else><span class="text-slate-400 font-normal">{{ t('m_none_selected') }}</span></template>
-                    </div>
-                </div>
-                <!-- Sunmi inner printer (only shown on Sunmi devices) -->
-                <div v-if="sunmiPrinterAvailable"
-                    @click="selectedPrinterType = selectedPrinterType === 'sunmi' ? '' : 'sunmi'"
-                    class="flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer"
-                    :class="selectedPrinterType === 'sunmi' ? 'bg-amber-50 border-amber-300' : 'border-slate-200'">
-                    <i class="fas fa-print text-slate-400"></i>
-                    <div class="flex-1 min-w-0">
-                        <div class="text-sm font-semibold text-slate-800">{{ t('m_sunmi_inner_printer') }}</div>
-                        <div v-if="sunmiDetectedModel" class="text-[11px] text-slate-400 mt-0.5">{{ sunmiDetectedModel }}</div>
-                    </div>
-                    <i v-if="selectedPrinterType === 'sunmi'" class="fas fa-circle-check text-amber-600"></i>
-                </div>
-                <!-- Paper width selector — shown for all mobile printer types; default 58mm -->
-                <div class="flex items-center justify-between px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200">
-                    <span class="text-xs font-semibold text-slate-600"><i class="fas fa-ruler-horizontal text-amber-500 me-1.5"></i>{{ t('m_paper_width') }}</span>
-                    <div class="flex gap-1.5">
-                        <button @click="saveSunmiPaperWidth(58)"
-                            class="px-3 py-1 rounded-lg text-xs font-semibold transition-colors"
-                            :class="sunmiPaperWidthMm === 58 ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-600'">58mm</button>
-                        <button @click="saveSunmiPaperWidth(80)"
-                            class="px-3 py-1 rounded-lg text-xs font-semibold transition-colors"
-                            :class="sunmiPaperWidthMm === 80 ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-600'">80mm</button>
-                    </div>
-                </div>
-
-                <div class="flex items-center justify-between">
-                    <span class="text-sm font-semibold text-slate-700"><i class="fab fa-bluetooth-b text-amber-500 me-1.5"></i>{{ t('m_bluetooth_printers') }}</span>
-                    <button @click="scanBluetoothPrinters" :disabled="isScanningBluetoothPrinters"
-                        class="px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-semibold text-slate-600 flex items-center gap-1.5 disabled:opacity-50">
-                        <i class="fas fa-arrows-rotate text-[10px]" :class="isScanningBluetoothPrinters ? 'animate-spin' : ''"></i>
-                        {{ isScanningBluetoothPrinters ? t('m_scanning') : t('m_scan') }}
-                    </button>
-                </div>
-                <div v-if="bluetoothPrinters.length === 0" class="text-xs text-slate-400 leading-relaxed">{{ t('m_no_bluetooth_printers') }}</div>
-                <div v-else class="space-y-1.5">
-                    <div v-for="d in bluetoothPrinters" :key="d.address" @click="selectBluetoothPrinter(d)"
-                        class="flex items-center gap-3 px-4 py-3 rounded-xl border"
-                        :class="selectedBluetoothPrinterInfo?.address === d.address ? 'bg-amber-50 border-amber-300' : 'border-slate-200'">
-                        <i class="fas fa-print text-slate-400"></i>
-                        <div class="flex-1 min-w-0">
-                            <div class="text-sm font-semibold text-slate-800 truncate">{{ d.name || d.address }}</div>
-                            <div class="text-[11px] text-slate-400" dir="ltr">{{ d.address }}</div>
+                <button @click="settingsSubPage = 'printer'"
+                    class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-200 bg-white active:bg-slate-50">
+                    <i class="fas fa-print text-amber-500"></i>
+                    <div class="flex-1 min-w-0 text-start">
+                        <div class="text-[11px] text-slate-400">{{ t('m_selected_printer') }}</div>
+                        <div class="text-sm font-semibold text-slate-700 truncate">
+                            <template v-if="selectedPrinterType === 'sunmi' && sunmiPrinterAvailable">{{ t('m_sunmi_inner_printer') }}</template>
+                            <template v-else-if="selectedPrinterType === 'bluetooth' && selectedBluetoothPrinterInfo">{{ selectedBluetoothPrinterInfo.name || selectedBluetoothPrinterInfo.address }}</template>
+                            <template v-else-if="selectedPrinterType === 'wifi' && wifiMultiEnabled && wifiPrinters.filter(p => p.active !== false).length">
+                                {{ t('m_wifi_multi_printer') }} · {{ wifiPrinters.filter(p => p.active !== false).length }}
+                            </template>
+                            <template v-else-if="selectedPrinterType === 'wifi' && wifiPrinters.find(p => p.id === wifiSinglePrinterId)">
+                                <span dir="ltr">{{ (wifiPrinters.find(p => p.id === wifiSinglePrinterId).name || wifiPrinters.find(p => p.id === wifiSinglePrinterId).ip) }}</span>
+                            </template>
+                            <template v-else><span class="text-slate-400 font-normal">{{ t('m_none_selected') }}</span></template>
                         </div>
-                        <i v-if="selectedBluetoothPrinterInfo?.address === d.address" class="fas fa-circle-check text-amber-600"></i>
                     </div>
-                </div>
-                <div>
-                    <label class="block text-xs font-semibold text-slate-600 mb-1.5"><i class="fas fa-wifi text-amber-500 me-1"></i>{{ t('m_wifi_printer_ip') }}</label>
-                    <div class="flex gap-2">
-                        <input type="text" :value="wifiPrinterIp" @change="saveWifiPrinterIp($event.target.value)" dir="ltr" placeholder="192.168.1.100"
-                            class="flex-1 border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50">
-                    </div>
-                </div>
+                    <i class="fas text-slate-300" :class="dir === 'rtl' ? 'fa-chevron-left' : 'fa-chevron-right'"></i>
+                </button>
             </section>
 
 
@@ -854,6 +805,274 @@
                             </button>
                         </div>
                     </div>
+                </div>
+            </section>
+        </div>
+      </template>
+
+      <!-- ════════ SETTINGS → PRINTER SETTINGS (sub-page) ════════ -->
+      <template v-else-if="currentPage === 'settings' && settingsSubPage === 'printer'">
+        <div class="px-4 py-3 bg-white border-b border-slate-100 flex-shrink-0 flex items-center gap-3">
+            <button @click="settingsSubPage = 'main'" class="w-9 h-9 -ms-2 rounded-full active:bg-slate-100 flex items-center justify-center">
+                <i class="fas text-slate-600" :class="dir === 'rtl' ? 'fa-chevron-right' : 'fa-chevron-left'"></i>
+            </button>
+            <h3 class="font-bold text-slate-800">{{ t('m_printer_settings_title') }}</h3>
+        </div>
+        <div class="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6">
+
+            <!-- Print method selector -->
+            <section class="space-y-2">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_printer_method') }}</div>
+                <div class="grid grid-cols-2 gap-2">
+                    <button @click="setPrinterType('')"
+                        class="px-3 py-3 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2"
+                        :class="selectedPrinterType === '' ? 'bg-amber-50 border-amber-300 text-amber-700' : 'border-slate-200 text-slate-600 bg-white'">
+                        <i class="fas fa-ban text-xs"></i>{{ t('m_printer_method_none') }}
+                    </button>
+                    <button @click="setPrinterType('bluetooth')"
+                        class="px-3 py-3 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2"
+                        :class="selectedPrinterType === 'bluetooth' ? 'bg-amber-50 border-amber-300 text-amber-700' : 'border-slate-200 text-slate-600 bg-white'">
+                        <i class="fab fa-bluetooth-b"></i>{{ t('m_printer_method_bluetooth') }}
+                    </button>
+                    <button @click="setPrinterType('wifi')"
+                        class="px-3 py-3 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2"
+                        :class="selectedPrinterType === 'wifi' ? 'bg-amber-50 border-amber-300 text-amber-700' : 'border-slate-200 text-slate-600 bg-white'">
+                        <i class="fas fa-wifi"></i>{{ t('m_printer_method_wifi') }}
+                    </button>
+                    <button v-if="sunmiPrinterAvailable" @click="setPrinterType('sunmi')"
+                        class="px-3 py-3 rounded-xl border text-sm font-semibold flex items-center justify-center gap-2"
+                        :class="selectedPrinterType === 'sunmi' ? 'bg-amber-50 border-amber-300 text-amber-700' : 'border-slate-200 text-slate-600 bg-white'">
+                        <i class="fas fa-print"></i>{{ t('m_printer_method_sunmi') }}
+                    </button>
+                </div>
+            </section>
+
+            <!-- Bluetooth configuration -->
+            <section v-if="selectedPrinterType === 'bluetooth'" class="space-y-3">
+                <div class="flex items-center justify-between">
+                    <span class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_bluetooth_printers') }}</span>
+                    <button @click="scanBluetoothPrinters" :disabled="isScanningBluetoothPrinters"
+                        class="px-3 py-1.5 bg-slate-100 rounded-lg text-xs font-semibold text-slate-600 flex items-center gap-1.5 disabled:opacity-50">
+                        <i class="fas fa-arrows-rotate text-[10px]" :class="isScanningBluetoothPrinters ? 'animate-spin' : ''"></i>
+                        {{ isScanningBluetoothPrinters ? t('m_scanning') : t('m_scan') }}
+                    </button>
+                </div>
+                <div v-if="bluetoothPrinters.length === 0" class="text-xs text-slate-400 leading-relaxed">{{ t('m_no_bluetooth_printers') }}</div>
+                <div v-else class="space-y-1.5">
+                    <div v-for="d in bluetoothPrinters" :key="d.address" @click="selectBluetoothPrinter(d)"
+                        class="flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer"
+                        :class="selectedBluetoothPrinterInfo?.address === d.address ? 'bg-amber-50 border-amber-300' : 'border-slate-200'">
+                        <i class="fas fa-print text-slate-400"></i>
+                        <div class="flex-1 min-w-0">
+                            <div class="text-sm font-semibold text-slate-800 truncate">{{ d.name || d.address }}</div>
+                            <div class="text-[11px] text-slate-400" dir="ltr">{{ d.address }}</div>
+                        </div>
+                        <i v-if="selectedBluetoothPrinterInfo?.address === d.address" class="fas fa-circle-check text-amber-600"></i>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Wi-Fi configuration -->
+            <section v-if="selectedPrinterType === 'wifi'" class="space-y-3">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_wifi_printer') }}</div>
+
+                <!-- Multi-printer mode toggle -->
+                <div class="flex items-start gap-3 px-4 py-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div class="flex-1 min-w-0">
+                        <div class="text-sm font-semibold text-slate-700">{{ t('m_wifi_multi_printer') }}</div>
+                        <div class="text-[11px] text-slate-400 mt-0.5 leading-snug">{{ t('m_wifi_multi_printer_help') }}</div>
+                    </div>
+                    <button @click="toggleWifiMultiPrinter(!wifiMultiEnabled)" type="button" role="switch" :aria-checked="wifiMultiEnabled"
+                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                        :class="wifiMultiEnabled ? 'bg-amber-500' : 'bg-slate-300'">
+                        <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out"
+                            :class="wifiMultiEnabled ? (dir === 'rtl' ? '-translate-x-5' : 'translate-x-5') : 'translate-x-0'"></span>
+                    </button>
+                </div>
+
+                <!-- Printer list -->
+                <div class="space-y-2">
+                    <div class="flex items-center justify-between">
+                        <span class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_wifi_printers_list') }}</span>
+                        <button @click="openAddWifiPrinterForm"
+                            class="px-3 py-1.5 bg-amber-500 active:bg-amber-600 rounded-lg text-xs font-bold text-white flex items-center gap-1.5">
+                            <i class="fas fa-plus text-[10px]"></i>{{ t('m_add_wifi_printer') }}
+                        </button>
+                    </div>
+
+                    <div v-if="!wifiPrinters.length" class="rounded-xl border border-dashed border-slate-200 px-4 py-6 text-center">
+                        <i class="fas fa-wifi text-slate-300 text-xl mb-1.5"></i>
+                        <div class="text-xs text-slate-400">{{ t('m_no_wifi_printers') }}</div>
+                    </div>
+
+                    <div v-else class="space-y-2">
+                        <div v-for="p in wifiPrinters" :key="p.id"
+                            class="flex items-center gap-2 px-3 py-2.5 rounded-xl border transition"
+                            :class="[
+                                (!wifiMultiEnabled && p.id === wifiSinglePrinterId) ? 'bg-amber-50 border-amber-300' : 'border-slate-200 bg-white',
+                                (wifiMultiEnabled && p.active === false) ? 'opacity-60' : '',
+                            ]">
+                            <!-- Tap row to select in single mode -->
+                            <div @click="!wifiMultiEnabled && setWifiSinglePrinter(p.id)"
+                                class="flex-1 min-w-0 flex items-center gap-3"
+                                :class="!wifiMultiEnabled ? 'cursor-pointer' : ''">
+                                <i class="fas fa-print text-slate-400"></i>
+                                <div class="min-w-0 flex-1">
+                                    <div class="text-sm font-semibold text-slate-800 truncate flex items-center gap-1.5">
+                                        {{ p.name || p.ip }}
+                                        <span v-if="!wifiMultiEnabled && p.id === wifiSinglePrinterId"
+                                            class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-bold bg-amber-500 text-white">
+                                            {{ t('m_wifi_active') }}
+                                        </span>
+                                    </div>
+                                    <div class="text-[11px] text-slate-400 flex items-center gap-1.5 flex-wrap">
+                                        <span dir="ltr">{{ p.ip }}{{ p.port && p.port !== 9100 ? ':' + p.port : '' }}</span>
+                                        <span v-if="wifiMultiEnabled"
+                                            class="inline-flex items-center px-1.5 py-0.5 rounded text-[9px] font-semibold bg-slate-100 text-slate-600">
+                                            {{ t('m_copy_type_' + (p.copy_type || 'both')) }}
+                                        </span>
+                                        <span v-if="wifiMultiEnabled && (p.copy_type || 'both') !== 'customer' && Array.isArray(p.category_ids) && p.category_ids.length"
+                                            class="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-semibold bg-amber-50 text-amber-700">
+                                            <i class="fas fa-filter text-[8px]"></i>{{ p.category_ids.length }}
+                                        </span>
+                                    </div>
+                                </div>
+                            </div>
+                            <!-- Active toggle (multi mode only) -->
+                            <button v-if="wifiMultiEnabled" @click="toggleWifiPrinterActive(p.id)" type="button" role="switch" :aria-checked="p.active !== false"
+                                class="relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                                :class="p.active !== false ? 'bg-amber-500' : 'bg-slate-300'">
+                                <span class="pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow transition duration-200 ease-in-out"
+                                    :class="p.active !== false ? (dir === 'rtl' ? '-translate-x-4' : 'translate-x-4') : 'translate-x-0'"></span>
+                            </button>
+                            <button @click="openEditWifiPrinterForm(p)" type="button"
+                                class="w-8 h-8 rounded-lg text-slate-500 active:bg-slate-100 flex items-center justify-center">
+                                <i class="fas fa-pen text-[11px]"></i>
+                            </button>
+                            <button @click="deleteWifiPrinter(p.id)" type="button"
+                                class="w-8 h-8 rounded-lg text-slate-500 active:bg-rose-50 active:text-rose-600 flex items-center justify-center">
+                                <i class="fas fa-trash text-[11px]"></i>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Add/Edit WiFi printer modal -->
+                <div v-if="showWifiPrinterForm" class="fixed inset-0 z-50 bg-slate-900/40 flex items-end justify-center" @click.self="closeWifiPrinterForm">
+                    <div class="w-full max-w-md bg-white rounded-t-2xl p-4 space-y-3" :dir="dir">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-base font-bold text-slate-800">{{ editingWifiPrinterId ? t('m_edit_wifi_printer') : t('m_add_wifi_printer') }}</h3>
+                            <button @click="closeWifiPrinterForm" class="w-8 h-8 rounded-full active:bg-slate-100 flex items-center justify-center">
+                                <i class="fas fa-xmark text-slate-500"></i>
+                            </button>
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('m_wifi_printer_name') }}</label>
+                            <input type="text" v-model="wifiPrinterForm.name" :placeholder="t('m_wifi_printer_name_placeholder')"
+                                class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1.5"><i class="fas fa-wifi text-amber-500 me-1"></i>{{ t('m_wifi_printer_ip') }}</label>
+                            <input type="text" v-model="wifiPrinterForm.ip" dir="ltr" placeholder="192.168.1.100"
+                                class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('m_wifi_printer_port') }}</label>
+                            <input type="number" inputmode="numeric" min="1" max="65535" v-model.number="wifiPrinterForm.port" dir="ltr" placeholder="9100"
+                                class="w-full border border-slate-200 rounded-xl px-4 py-2.5 text-sm bg-slate-50">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-semibold text-slate-600 mb-1.5">{{ t('m_wifi_copy_type') }}</label>
+                            <div class="grid grid-cols-3 gap-1.5">
+                                <button type="button" @click="wifiPrinterForm.copy_type = 'both'"
+                                    class="px-2 py-2 rounded-lg border text-xs font-semibold"
+                                    :class="(wifiPrinterForm.copy_type || 'both') === 'both' ? 'bg-amber-50 border-amber-300 text-amber-700' : 'border-slate-200 text-slate-600 bg-white'">
+                                    {{ t('m_copy_type_both') }}
+                                </button>
+                                <button type="button" @click="wifiPrinterForm.copy_type = 'customer'"
+                                    class="px-2 py-2 rounded-lg border text-xs font-semibold"
+                                    :class="wifiPrinterForm.copy_type === 'customer' ? 'bg-amber-50 border-amber-300 text-amber-700' : 'border-slate-200 text-slate-600 bg-white'">
+                                    {{ t('m_copy_type_customer') }}
+                                </button>
+                                <button type="button" @click="wifiPrinterForm.copy_type = 'company'"
+                                    class="px-2 py-2 rounded-lg border text-xs font-semibold"
+                                    :class="wifiPrinterForm.copy_type === 'company' ? 'bg-amber-50 border-amber-300 text-amber-700' : 'border-slate-200 text-slate-600 bg-white'">
+                                    {{ t('m_copy_type_company') }}
+                                </button>
+                            </div>
+                            <div class="text-[11px] text-slate-400 mt-1 leading-snug">{{ t('m_wifi_copy_type_help') }}</div>
+                        </div>
+                        <div v-if="(wifiPrinterForm.copy_type || 'both') !== 'customer' && categories.length">
+                            <label class="block text-xs font-semibold text-slate-600 mb-1.5">
+                                {{ t('m_wifi_printer_categories') }}
+                            </label>
+                            <div class="flex flex-wrap gap-1.5 max-h-40 overflow-y-auto p-1">
+                                <button type="button"
+                                    v-for="cat in categories" :key="cat.id"
+                                    @click="toggleWifiPrinterFormCategory(cat.id)"
+                                    class="px-2.5 py-1.5 rounded-full border text-[11px] font-semibold"
+                                    :class="(wifiPrinterForm.category_ids || []).map(String).includes(String(cat.id))
+                                        ? 'bg-amber-50 border-amber-300 text-amber-700'
+                                        : 'border-slate-200 text-slate-600 bg-white'">
+                                    {{ cat.name }}
+                                </button>
+                            </div>
+                            <div class="text-[11px] text-slate-400 mt-1 leading-snug">
+                                {{ (wifiPrinterForm.category_ids || []).length
+                                    ? t('m_wifi_printer_categories_filtered', { n: (wifiPrinterForm.category_ids || []).length })
+                                    : t('m_wifi_printer_categories_help') }}
+                            </div>
+                        </div>
+                        <div class="pt-2 flex gap-2">
+                            <button @click="closeWifiPrinterForm" type="button"
+                                class="flex-1 py-2.5 rounded-xl bg-slate-100 active:bg-slate-200 text-slate-700 text-sm font-semibold">
+                                {{ t('cancel') }}
+                            </button>
+                            <button @click="saveWifiPrinterForm" type="button"
+                                class="flex-1 py-2.5 rounded-xl bg-amber-500 active:bg-amber-600 text-white text-sm font-bold">
+                                {{ t('save') }}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Sunmi info -->
+            <section v-if="selectedPrinterType === 'sunmi' && sunmiPrinterAvailable" class="space-y-2">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_sunmi_inner_printer') }}</div>
+                <div v-if="sunmiDetectedModel" class="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-[11px] text-slate-500">{{ sunmiDetectedModel }}</div>
+            </section>
+
+            <!-- Paper width — Bluetooth/Sunmi only; Wi-Fi printers advertise their own width. -->
+            <section v-if="selectedPrinterType !== 'wifi'" class="space-y-2">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_paper_width') }}</div>
+                <div class="flex items-center justify-between px-4 py-2.5 rounded-xl bg-slate-50 border border-slate-200">
+                    <span class="text-xs font-semibold text-slate-600"><i class="fas fa-ruler-horizontal text-amber-500 me-1.5"></i>{{ t('m_paper_width') }}</span>
+                    <div class="flex gap-1.5">
+                        <button @click="saveSunmiPaperWidth(58)"
+                            class="px-3 py-1 rounded-lg text-xs font-semibold transition-colors"
+                            :class="sunmiPaperWidthMm === 58 ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-600'">58mm</button>
+                        <button @click="saveSunmiPaperWidth(80)"
+                            class="px-3 py-1 rounded-lg text-xs font-semibold transition-colors"
+                            :class="sunmiPaperWidthMm === 80 ? 'bg-amber-500 text-white' : 'bg-slate-200 text-slate-600'">80mm</button>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Copies — Wi-Fi handles copy routing per-printer in its own form, so hide here. -->
+            <section v-if="selectedPrinterType !== 'wifi'" class="space-y-2">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_copies_section') }}</div>
+                <div class="flex items-start gap-3 px-4 py-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div class="flex-1 min-w-0">
+                        <div class="text-sm font-semibold text-slate-700">{{ t('company_copy') }}</div>
+                        <div class="text-[11px] text-slate-400 mt-0.5 leading-snug">{{ t('company_copy_help') }}</div>
+                    </div>
+                    <button @click="toggleCompanyCopy(!companyCopyEnabled)" type="button" role="switch" :aria-checked="companyCopyEnabled"
+                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                        :class="companyCopyEnabled ? 'bg-amber-500' : 'bg-slate-300'">
+                        <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out"
+                            :class="companyCopyEnabled ? (dir === 'rtl' ? '-translate-x-5' : 'translate-x-5') : 'translate-x-0'"></span>
+                    </button>
                 </div>
             </section>
         </div>
@@ -1227,7 +1446,12 @@
                 <button @click="showModifierModal = false" class="w-9 h-9 flex items-center justify-center rounded-xl text-slate-500 active:bg-slate-100 flex-shrink-0">
                     <i class="fas" :class="dir === 'rtl' ? 'fa-arrow-right' : 'fa-arrow-left'"></i>
                 </button>
-                <h3 class="font-bold text-slate-800 text-sm truncate">{{ pendingProductForModifier.name }}</h3>
+                <div class="flex items-center gap-2 min-w-0">
+                    <div class="w-7 h-7 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
+                        <i class="fas fa-sliders text-amber-600 text-xs"></i>
+                    </div>
+                    <h3 class="font-bold text-slate-800 text-sm truncate">{{ pendingProductForModifier.name }}</h3>
+                </div>
             </div>
             <button @click="confirmModifiers" class="px-4 py-2 m-btn-gold rounded-xl text-sm font-bold flex-shrink-0">{{ t('add_to_cart') }}</button>
         </div>
@@ -1236,12 +1460,15 @@
                 <div class="text-xs font-bold text-slate-600 uppercase tracking-wider mb-2">{{ set.name }}</div>
                 <div class="space-y-1.5">
                     <label v-for="opt in (set.options || [])" :key="opt.name"
-                        class="flex items-center gap-3 px-4 py-3 rounded-xl border"
-                        :class="tempModifierSelections[set.name]?.name === opt.name ? 'bg-amber-50 border-amber-300 text-amber-700' : 'border-slate-200 text-slate-700'">
-                        <input type="radio" :name="'modifier_' + set.name" :value="opt" v-model="tempModifierSelections[set.name]" class="hidden">
-                        <div class="w-5 h-5 rounded-full border-2 flex items-center justify-center flex-shrink-0"
-                            :class="tempModifierSelections[set.name]?.name === opt.name ? 'border-amber-500 bg-amber-500' : 'border-slate-300'">
-                            <div v-if="tempModifierSelections[set.name]?.name === opt.name" class="w-2 h-2 rounded-full bg-white"></div>
+                        class="flex items-center gap-3 px-4 py-3 rounded-xl border cursor-pointer"
+                        :class="(tempModifierSelections[set.name] || []).some(o => o.name === opt.name) ? 'bg-amber-50 border-amber-300 text-amber-700' : 'border-slate-200 text-slate-700'">
+                        <input type="checkbox" :value="opt" v-model="tempModifierSelections[set.name]" class="hidden">
+                        <div class="w-5 h-5 rounded-md border-2 flex items-center justify-center flex-shrink-0"
+                            :class="(tempModifierSelections[set.name] || []).some(o => o.name === opt.name) ? 'border-amber-500 bg-amber-500' : 'border-slate-300'">
+                            <svg v-if="(tempModifierSelections[set.name] || []).some(o => o.name === opt.name)"
+                                class="w-3 h-3 text-white" fill="none" viewBox="0 0 10 8" stroke="currentColor" stroke-width="2.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M1 4l3 3 5-5"/>
+                            </svg>
                         </div>
                         <span class="text-sm font-medium flex-1">{{ opt.name }}</span>
                         <span v-if="opt.price > 0" class="text-xs font-semibold text-emerald-600">+{{ fmt(opt.price) }}</span>
@@ -1514,9 +1741,11 @@
 
         <div class="p-3 border-t border-slate-100 flex gap-2 flex-shrink-0" style="padding-bottom: max(12px, env(safe-area-inset-bottom));">
             <button @click="balanceDue > 0.005 ? (confirm(t('confirm_partial_payment')) && processPayment()) : processPayment()"
-                :class="balanceDue > 0.005 ? 'bg-amber-500' : 'bg-emerald-600'"
+                :disabled="processingPayment"
+                :class="[balanceDue > 0.005 ? 'bg-amber-500' : 'bg-emerald-600', processingPayment ? 'opacity-60 pointer-events-none' : '']"
                 class="flex-1 py-3.5 text-white rounded-xl text-sm font-bold flex items-center justify-center gap-2">
-                <i class="fas fa-check"></i><span>{{ t('complete_payment') }}</span>
+                <i :class="processingPayment ? 'fas fa-spinner fa-spin' : 'fas fa-check'"></i>
+                <span>{{ t('complete_payment') }}</span>
             </button>
         </div>
     </div>
