@@ -2242,14 +2242,11 @@ function printViaAndroidWifiMultiBridge(receipt) {
                 if (!targetCatIds || !targetCatIds.length) return pngByCopy.company;
                 var comboKey = targetCatIds.slice().sort().join(',');
                 var comboPng = pngByCopy['company_cats_' + comboKey];
-                if (comboPng) return comboPng;
-                // No combo PNG rendered: order likely had no items in these categories.
-                // If we can confirm that from orderCategoryIds, drop this target entirely.
-                if (orderCategoryIds.length > 0
-                    && !targetCatIds.some(function(c) { return orderCategoryIds.indexOf(String(c)) !== -1; })) {
-                    return null;
-                }
-                return pngByCopy.company;
+                // A filter was requested. If no combo PNG was rendered, the dispatcher
+                // already found zero matching items for this combo — drop the target.
+                // Never fall back to the unfiltered company copy here: the user set a
+                // filter, so "no matches" means "print nothing", not "print everything".
+                return comboPng || null;
             }
 
             var nativeTargets = [];

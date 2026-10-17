@@ -71,7 +71,8 @@ createApp({
         const sunmiDetectedModel         = ref('');        // model string injected by SunmiPrinterManager (e.g. 'V2', 'V3 Pro')
         const sunmiPaperWidthMm          = ref(58);       // 58 | 80 — matches paper roll installed
         const companyCopyEnabled         = ref(false);     // prints a second kitchen-style ticket with modifiers after the customer copy, cut between
-        const settingsSubPage            = ref('main');    // 'main' | 'printer' — Settings page in-template sub-view
+        const useServerInvoiceDesign     = ref(false);     // 80mm only: use the cloud-synced slim/slim2 template instead of the built-in static design
+        const settingsSubPage            = ref('main');    // 'main' | 'printer' | 'advanced' — Settings page in-template sub-view
 
         // ── Settings tabs & printer CRUD ─────────────────────────────────────
         const settingsTab           = ref('general');
@@ -303,6 +304,7 @@ createApp({
             denominationCounts: {},
         });
         const closeRegisterFlowBusy = ref(false);
+        const closeRegisterPrintBusy = ref(false);
 
         // ── Open cash register (cash in hand — same as web POS) ──────────────
         const showOpenRegisterModal = ref(false);
@@ -327,9 +329,10 @@ createApp({
         const CURRENCY_SYMBOL = '﷼';
 
         const settings = ref({
-            serverUrl:  '',
-            apiKey:     '',
-            locationId: '',
+            serverUrl:      '',
+            apiKey:         '',
+            locationId:     '',
+            showStockBadge: true,
         });
 
         // ── i18n / language ──────────────────────────────────────────────────
@@ -2484,9 +2487,16 @@ createApp({
             let receipt;
             if (isMobileApp) {
                 let targetWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
+                // The built-in thermal template is the only design. When the user has the
+                // "use server design" toggle on, we pass the synced invoice layout in so
+                // the SAME template honors the dashboard-configured show_* flags, header /
+                // footer text, sub-heading lines, and logo. When the toggle is off, no
+                // layout settings are applied — the serverless default is unchanged.
+                // Company copy is a fully independent ticket driven only by its own toggle.
+                const applyLayoutSettings = useServerInvoiceDesign.value;
                 const mobileHtml = buildMobileThermalReceiptHtml(
                     sale, settings.value, business.value, locations.value,
-                    invoiceLayouts.value, targetWidthPx,
+                    invoiceLayouts.value, targetWidthPx, applyLayoutSettings,
                 );
                 const companyCopyHtml = companyCopyEnabled.value
                     ? buildMobileCompanyCopyHtml(sale, settings.value, business.value, locations.value, targetWidthPx)
@@ -2543,7 +2553,19 @@ createApp({
                         bluetooth_printer_name: selectedBluetoothPrinterInfo.value.name || '',
                     };
                 } else if (selectedPrinterType.value === 'wifi') {
-                    const activePrinters = wifiPrinters.value.filter((p) => p.active !== false && p.ip);
+                    // Returns are customer-copy only. Drop company-only printers entirely,
+                    // and strip the company role from 'both' printers so no company/kitchen
+                    // ticket is printed for a sell_return.
+                    const isReturnSale = sale && sale.type === 'sell_return';
+                    const activePrinters = wifiPrinters.value
+                        .filter((p) => p.active !== false && p.ip)
+                        .filter((p) => !isReturnSale || p.copy_type !== 'company')
+                        .map((p) => isReturnSale && p.copy_type === 'both'
+                            ? { ...p, copy_type: 'customer' }
+                            : p);
+                    if (isReturnSale && receipt.company_copy_html_content) {
+                        receipt = { ...receipt, company_copy_html_content: null };
+                    }
                     const singlePrinter  = wifiPrinters.value.find((p) => p.id === wifiSinglePrinterId.value)
                         || wifiPrinters.value.find((p) => !!p.ip);
                     if (wifiMultiEnabled.value && activePrinters.length) {
@@ -2618,6 +2640,28 @@ createApp({
                             wifi_printer_name:       t('m_wifi_printer'),
                         };
                     } else if (singlePrinter) {
+                        // Single Wi-Fi printer: honor its own copy_type without any
+                        // dependency on the Bluetooth-oriented global company-copy toggle.
+                        // If the chosen printer wants company/both and we don't already
+                        // have a company-copy HTML (because the global toggle is off),
+                        // build one on the fly here.
+                        const singleWantsCompany = (singlePrinter.copy_type === 'company'
+                            || singlePrinter.copy_type === 'both')
+                            && !isReturnSale;
+                        if (singleWantsCompany && !receipt.company_copy_html_content) {
+                            const widthForCopy = sunmiPaperWidthMm.value === 80 ? 576 : 384;
+                            receipt = {
+                                ...receipt,
+                                company_copy_html_content: buildMobileCompanyCopyHtml(
+                                    sale, settings.value, business.value, locations.value, widthForCopy,
+                                ),
+                            };
+                        }
+                        // Conversely, if the printer is customer-only, strip any company copy
+                        // that may have been produced by the global toggle so it doesn't print.
+                        if (singlePrinter.copy_type === 'customer' && receipt.company_copy_html_content) {
+                            receipt = { ...receipt, company_copy_html_content: null };
+                        }
                         receipt = {
                             ...receipt,
                             print_type: 'wifi_android',
@@ -2884,6 +2928,7 @@ createApp({
                 wifiPrinterIp.value = mobilePrn.data.wifiIp || '';
                 if (mobilePrn.data.sunmiPaperWidthMm) sunmiPaperWidthMm.value = mobilePrn.data.sunmiPaperWidthMm;
                 companyCopyEnabled.value = !!mobilePrn.data.companyCopy;
+                useServerInvoiceDesign.value = !!mobilePrn.data.useServerInvoiceDesign;
                 // Multi-printer config
                 wifiMultiEnabled.value    = !!mobilePrn.data.wifiMultiEnabled;
                 wifiSinglePrinterId.value = mobilePrn.data.wifiSinglePrinterId || '';
@@ -3021,6 +3066,7 @@ createApp({
                     wifiPort: wifiPrinterPort.value,
                     sunmiPaperWidthMm: sunmiPaperWidthMm.value,
                     companyCopy: companyCopyEnabled.value,
+                    useServerInvoiceDesign: useServerInvoiceDesign.value,
                     wifiMultiEnabled: wifiMultiEnabled.value,
                     wifiSinglePrinterId: wifiSinglePrinterId.value,
                     wifiPrinters: cloneForIdb(wifiPrinters.value),
@@ -3160,6 +3206,11 @@ createApp({
 
         const toggleCompanyCopy = async (val) => {
             companyCopyEnabled.value = !!val;
+            await persistMobilePrinterConfig();
+        };
+
+        const toggleUseServerInvoiceDesign = async (val) => {
+            useServerInvoiceDesign.value = !!val;
             await persistMobilePrinterConfig();
         };
 
@@ -5010,9 +5061,21 @@ createApp({
             }
         };
 
+        const printCloseRegister = () => {
+            if (!closeRegisterSnapshot.value?.register || closeRegisterPrintBusy.value) return;
+            closeRegisterPrintBusy.value = true;
+            printCloseRegisterReceipt(closeRegisterSnapshot.value, closeRegisterForm.value);
+            setTimeout(() => { closeRegisterPrintBusy.value = false; }, 8000);
+        };
+
         const printCloseRegisterReceipt = async (snapshot, form) => {
             let targetWidthPx = sunmiPaperWidthMm.value === 80 ? 576 : 384;
-            const html = buildCloseRegisterReceiptHtml(snapshot, form, business.value, targetWidthPx);
+            const hasItems = !!(snapshot?.register?.transaction_breakdown?.product_details?.length
+                || snapshot?.register?.transaction_breakdown?.product_details_by_brand?.length
+                || snapshot?.register?.transaction_breakdown?.types_of_service_details?.length);
+            const html = hasItems
+                ? buildCloseRegisterReceiptHtmlDetailed(snapshot, form, business.value, targetWidthPx)
+                : buildCloseRegisterReceiptHtml(snapshot, form, business.value, targetWidthPx);
             let receipt = {
                 is_enabled: true,
                 print_type: 'browser',
@@ -5475,7 +5538,7 @@ createApp({
             printReceipt,
             openReturnModal, selectAllReturnItems, saveReturn,
             loadSales, viewSale, retrySingle, discardLocalUnsyncedSale,
-            saveSettings, loadLocations, saveLocalPrinterConfig, localPrinterName,
+            saveSettings, persistConfig, loadLocations, saveLocalPrinterConfig, localPrinterName,
             // Mobile (Android) UI + printer picker
             mobileCartOpen, mobileProductViewMode,
             bluetoothPrinters, isScanningBluetoothPrinters, selectedBluetoothPrinterInfo,
@@ -5484,6 +5547,7 @@ createApp({
             scanBluetoothPrinters, selectBluetoothPrinter, saveWifiPrinterIp, saveWifiPrinterPort,
             setPrinterType, settingsSubPage,
             companyCopyEnabled, toggleCompanyCopy,
+            useServerInvoiceDesign, toggleUseServerInvoiceDesign,
             // Wi-Fi multi-printer
             wifiPrinters, wifiMultiEnabled, wifiSinglePrinterId,
             showWifiPrinterForm, editingWifiPrinterId, wifiPrinterForm,
@@ -5503,7 +5567,7 @@ createApp({
             syncFailureLog, clearSyncFailureLog,
             appVersion, updateStatus, updateInfo, checkForUpdate, openUpdateDownload,
             apkDownloadStatus, apkDownloadProgress, apkDownloadError,
-            openCloseRegisterFlow, retryCloseRegisterFlow, submitCloseRegister, dismissCloseRegisterModal,
+            openCloseRegisterFlow, retryCloseRegisterFlow, submitCloseRegister, dismissCloseRegisterModal, printCloseRegister, closeRegisterPrintBusy,
             openOpenRegisterFlow, submitOpenRegister, dismissOpenRegisterModal, switchCloseModalToOpenRegister,
             gridEl, onGridScroll, visibleProducts, vTopPad, vBottomPad, vTotalH,
             mListVisibleProducts, mListTopPad, mListBottomPad,

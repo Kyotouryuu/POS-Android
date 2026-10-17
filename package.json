@@ -1,6 +1,6 @@
 {
   "name": "zat-pos-android",
-  "version": "1.1.5",
+  "version": "1.1.8",
   "description": "ZAT POS - Android App",
   "scripts": {
     "preview:android": "node scripts/preview.js --port 4174 --open /mobile.html",

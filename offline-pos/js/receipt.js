@@ -668,36 +668,111 @@ function getReceiptPayloadForSale(sale) {
 //     rather than shrinking, so it stays legible without a magnifying glass
 //   - Item = 2 rows: line1 "name | total", line2 (small) "qty × unit_price"
 //   - QR at very bottom in its own centered block
-function buildMobileThermalReceiptHtml(sale, settings, business, locations, invoiceLayouts, thermalWidthPx) {
+function buildMobileThermalReceiptHtml(sale, settings, business, locations, invoiceLayouts, thermalWidthPx, applyLayoutSettings) {
     const is58mm = (thermalWidthPx || 384) <= 400;
     const isReturn = sale.type === 'sell_return';
     const location = getLocationForSale(sale, locations, settings) || {};
     const layout = getInvoiceLayoutForSale(sale, locations, invoiceLayouts, settings) || {};
-    const cs = layout.common_settings || {};
-    const hidePrices = !!(typeof cs === 'string' ? JSON.parse(cs || '{}') : cs).hide_price;
+    const csRaw = layout.common_settings || {};
+    const cs = typeof csRaw === 'string' ? (() => { try { return JSON.parse(csRaw || '{}'); } catch { return {}; } })() : csRaw;
+    const hidePrices = !!cs.hide_price;
     const biz = business || {};
     const f = makeFormatter();
 
+    // When applyLayoutSettings is true, honor the dashboard-configured invoice-layout
+    // fields (show_* flags, header_text, footer_text, sub_heading_lines, logo, custom
+    // labels). When false, the receipt renders the serverless default header/footer
+    // regardless of what the layout says — baseline behavior preserved exactly.
+    const useLayout = !!applyLayoutSettings;
+    const flagOn = (v) => v == 1 || v === true || v === '1';
+
     const invoiceNo   = sale.server_invoice_no || sale.invoice_no || '';
-    const invoiceDate = new Date(sale.created_at).toLocaleString('ar-SA', {
-        year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', hour12: false,
-    });
+    const includeTime = !useLayout || layout.show_time == null || flagOn(layout.show_time);
+    const invoiceDate = new Date(sale.created_at).toLocaleString('ar-SA', includeTime
+        ? { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }
+        : { year: 'numeric', month: '2-digit', day: '2-digit' });
     const cashCustomerLabel = t('receipt_cash_customer');
     const customerName = (sale.customer_name || cashCustomerLabel)
         .replace('Walk-In Customer', cashCustomerLabel)
         .replace('Walk In Customer', cashCustomerLabel);
 
-    const bizName = biz.name || '';
-    const bizVat  = biz.tax_number_1 || '';
-    const bizCr   = biz.tax_number_2 || '';
+    const rawBizName = biz.name || '';
+    const bizName = useLayout ? (flagOn(layout.show_business_name) ? rawBizName : '') : rawBizName;
+    const rawBizVat = biz.tax_number_1 || '';
+    const rawBizCr  = biz.tax_number_2 || '';
+    // show_tax_1 defaults to 1, show_tax_2 defaults to 0 — mirror the dashboard semantics.
+    const bizVat = useLayout
+        ? ((layout.show_tax_1 == null || flagOn(layout.show_tax_1)) ? rawBizVat : '')
+        : rawBizVat;
+    const bizCr  = useLayout
+        ? (flagOn(layout.show_tax_2) ? rawBizCr : '')
+        : rawBizCr;
     const bizCrLabel = biz.tax_label_2 || 'CR';
     // Suppress the location line when it duplicates the business name (common for
     // single-location tenants where both fields hold the same string).
     const rawLocName = location.name || '';
-    const locName = (rawLocName && rawLocName.trim() !== bizName.trim()) ? rawLocName : '';
-    const locAddr = [location.address_line_1, location.city].filter(Boolean).join('، ');
-    const locPhone = location.mobile || location.landline || '';
+    const dedupedLocName = (rawLocName && rawLocName.trim() !== rawBizName.trim()) ? rawLocName : '';
+    const locName = useLayout
+        ? (flagOn(layout.show_location_name) ? dedupedLocName : '')
+        : dedupedLocName;
+
+    // Address assembly honors invoice-layout show_* flags when enabled, otherwise
+    // keeps the serverless default of "address_line_1 + city".
+    let addrParts;
+    if (useLayout) {
+        addrParts = [];
+        if (flagOn(layout.show_landmark) && location.landmark) addrParts.push(location.landmark);
+        if (flagOn(layout.show_city)     && location.city)     addrParts.push(location.city);
+        if (flagOn(layout.show_state)    && location.state)    addrParts.push(location.state);
+        if (flagOn(layout.show_zip_code) && location.zip_code) addrParts.push(location.zip_code);
+        if (flagOn(layout.show_country)  && location.country)  addrParts.push(location.country);
+    } else {
+        addrParts = [location.address_line_1, location.city].filter(Boolean);
+    }
+    const locAddr = addrParts.join('، ');
+
+    const rawLocPhone = location.mobile || location.landline || '';
+    const locPhone = useLayout
+        ? (flagOn(layout.show_mobile_number) ? rawLocPhone : '')
+        : rawLocPhone;
+    const locEmail = useLayout && flagOn(layout.show_email) ? (location.email || '') : '';
+
+    // Logo: only when the layout says show_logo and we can build an absolute URL from
+    // the configured server. If the fetch fails on-device (CORS / offline), html2canvas
+    // will capture an empty space — same visual result as the toggle being off.
+    const serverUrl = (settings && settings.serverUrl) || '';
+    const logoUrl = (useLayout && flagOn(layout.show_logo) && layout.logo && serverUrl)
+        ? `${String(serverUrl).replace(/\/$/, '')}/uploads/invoice_logos/${layout.logo}`
+        : '';
+
+    const headerText    = useLayout ? (layout.header_text    || '') : '';
+    const footerText    = useLayout ? (layout.footer_text    || '') : '';
+    const invoiceHeading = useLayout ? (layout.invoice_heading || '') : '';
+    const invoiceNoLabel = (useLayout && layout.invoice_no_prefix)
+        ? String(layout.invoice_no_prefix).replace(/Invoice No\.?/gi, 'رقم الفاتورة')
+        : 'رقم الفاتورة';
+    const subHeadingLines = useLayout
+        ? [1, 2, 3, 4, 5]
+            .map((n) => String(layout['sub_heading_line' + n] || '').trim())
+            .filter(Boolean)
+        : [];
+
+    // Label overrides from dashboard invoice-layout edit page. When useLayout is on
+    // and the field is non-empty, use the configured string; otherwise fall back to
+    // the serverless Arabic defaults so the baseline template is byte-identical.
+    const pick = (field, fallback) => (useLayout && layout[field]) ? layout[field] : fallback;
+    const dateLabel        = pick('date_label', 'التاريخ');
+    const customerLabel    = pick('customer_label', 'العميل');
+    const productLabel     = pick('table_product_label', 'المنتج');
+    const qtyLabel         = pick('table_qty_label', 'كمية');
+    const unitPriceLabel   = pick('table_unit_price_label', 'سعر');
+    const subtotalColLabel = pick('table_subtotal_label', 'إجمالي');
+    const subTotalRowLabel = pick('sub_total_label', 'المجموع قبل الضريبة');
+    const taxRowLabel      = pick('tax_label', 'ضريبة القيمة المضافة');
+    const totalRowLabel    = pick('total_label', 'الإجمالي شامل الضريبة');
+    const changeRowLabel   = pick('change_return_label', 'الباقي');
+    // show_customer defaults to visible when the field is absent to preserve baseline.
+    const showCustomer     = !useLayout || layout.show_customer == null || flagOn(layout.show_customer);
 
     const baseFont     = is58mm ? '26px' : '34px';
     const smallFont    = is58mm ? '24px' : '32px';
@@ -729,15 +804,15 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
         const colsHeader = hidePrices
             ? `<tr style="border-bottom:2px solid #000;">
                 <th style="text-align:center;${thStyle}width:7%;">#</th>
-                <th style="text-align:right;${thStyle}">المنتج</th>
-                <th style="text-align:right;${thStyle}width:15%;">كمية</th>
+                <th style="text-align:right;${thStyle}">${productLabel}</th>
+                <th style="text-align:right;${thStyle}width:15%;">${qtyLabel}</th>
                </tr>`
             : `<tr style="border-bottom:2px solid #000;">
                 <th style="text-align:center;${thStyle}width:6%;">#</th>
-                <th style="text-align:right;${thStyle}">المنتج</th>
-                <th style="text-align:center;${thStyle}width:11%;">كمية</th>
-                <th style="text-align:left;${thStyle}width:20%;white-space:nowrap;direction:ltr;">سعر</th>
-                <th style="text-align:left;${thStyle}width:21%;white-space:nowrap;direction:ltr;">إجمالي</th>
+                <th style="text-align:right;${thStyle}">${productLabel}</th>
+                <th style="text-align:center;${thStyle}width:11%;">${qtyLabel}</th>
+                <th style="text-align:left;${thStyle}width:20%;white-space:nowrap;direction:ltr;">${unitPriceLabel}</th>
+                <th style="text-align:left;${thStyle}width:21%;white-space:nowrap;direction:ltr;">${subtotalColLabel}</th>
                </tr>`;
         const rows = (sale.items || []).map((item, idx) => {
             const unitPriceDisplay = item.unit_price_exc_tax ?? item.unit_price;
@@ -784,11 +859,11 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
     const vatPctLabel = itemTaxPcts.length === 1 ? ` (${itemTaxPcts[0]}%)` : '';
     const totalsRows = [];
     if (!hidePrices) {
-        totalsRows.push(`<div class="row"><span class="right">المجموع قبل الضريبة</span><span class="left">${f(agg.subtotal)}</span></div>`);
+        totalsRows.push(`<div class="row"><span class="right">${subTotalRowLabel}</span><span class="left">${f(agg.subtotal)}</span></div>`);
         if (derivedTax > 0.005) {
-            totalsRows.push(`<div class="row"><span class="right">ضريبة القيمة المضافة${vatPctLabel}</span><span class="left">${f(derivedTax)}</span></div>`);
+            totalsRows.push(`<div class="row"><span class="right">${taxRowLabel}${vatPctLabel}</span><span class="left">${f(derivedTax)}</span></div>`);
         }
-        totalsRows.push(`<div class="row grand"><span class="right">الإجمالي شامل الضريبة</span><span class="left">${f(agg.total)}</span></div>`);
+        totalsRows.push(`<div class="row grand"><span class="right">${totalRowLabel}</span><span class="left">${f(agg.total)}</span></div>`);
         // Payment breakdown — only shown when it adds info beyond the grand total:
         //   - Multiple payments (split tender): list each
         //   - Single payment that doesn't fully cover the total: show it + "paid"
@@ -804,7 +879,7 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
                 totalsRows.push(`<div class="row sub"><span class="right sub-text">${arPayMethod(p.method)}</span><span class="left sub-text">${f(p.amount)}</span></div>`);
             });
             if (change > 0.005) {
-                totalsRows.push(`<div class="row"><span class="right">الباقي</span><span class="left">${f(change)}</span></div>`);
+                totalsRows.push(`<div class="row"><span class="right">${changeRowLabel}</span><span class="left">${f(change)}</span></div>`);
             }
         }
     }
@@ -812,7 +887,16 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
     // Explicit inline size on the SVG prevents prepareCaptureDom's maxWidth:100% from
     // confusing the layout pass (without it the SVG tries to be 576px wide, then gets
     // capped to 250px by CSS max-width but the containing box was already sized at 576px).
-    const qrHtml = buildZatcaQrSvg(sale.zatca_qr_code || null, 'slim2', is58mm ? 120 : 250);
+    // When applyLayoutSettings is on, honor the invoice layout's show_qr_code flag.
+    // (Default template behavior: always render if the sale has a ZATCA QR.)
+    // When useLayout: honor show_qr_code; additionally respect common_settings.zatca_qr
+    // if present (dashboard exposes a dedicated ZATCA QR toggle under common settings).
+    const showQr = useLayout
+        ? (flagOn(layout.show_qr_code) && (cs.zatca_qr == null || flagOn(cs.zatca_qr)))
+        : true;
+    const qrHtml = showQr
+        ? buildZatcaQrSvg(sale.zatca_qr_code || null, 'slim2', is58mm ? 120 : 250)
+        : '';
 
     const bodyWidth = thermalWidthPx + 'px';
     const qrSize    = is58mm ? (thermalWidthPx - 30) + 'px' : '250px';
@@ -844,27 +928,50 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
         .rcp .zatca-qr-block{padding-bottom:10px!important;margin:0!important;width:100%;display:block!important;text-align:center}
         .rcp .zatca-qr-block svg{display:inline-block!important;width:${qrSize}!important;max-width:${qrSize}!important;height:${qrSize}!important}
         .rcp .zatca-qr-block p{font-size:${smallFont}!important;font-weight:700!important;color:#000!important;margin-top:6px!important;text-align:center!important}
-        .rcp .return-banner{text-align:center;font-size:${grandFont};font-weight:900;border:3px solid #000;padding:6px 0;margin:8px 0;letter-spacing:2px;-webkit-text-stroke:0.7px #000}
+        .rcp .return-banner{text-align:center;font-size:${grandFont};font-weight:900;border:3px solid #000;padding:6px 0;margin:8px 0;-webkit-text-stroke:0.7px #000}
     `.replace(/\s+/g, ' ');
 
+    const logoMaxWidth = is58mm ? '220px' : '340px';
+    const subHeadingHtml = subHeadingLines
+        .map((line) => `<div class="header-line small">${line}</div>`)
+        .join('');
+    const headerTextHtml = headerText
+        ? `<div class="header-line small" style="white-space:pre-line;">${headerText}</div>`
+        : '';
+    const footerTextHtml = footerText
+        ? `<hr><div class="header-line small" style="white-space:pre-line;">${footerText}</div>`
+        : '';
+    const invoiceHeadingHtml = invoiceHeading
+        ? `<div class="header-line" style="font-weight:900;">${invoiceHeading}</div>`
+        : '';
+    const logoHtml = logoUrl
+        ? `<div style="text-align:center;margin:${is58mm ? '4px' : '6px'} 0;"><img src="${logoUrl}" alt="logo" crossorigin="anonymous" style="max-width:${logoMaxWidth};max-height:${is58mm ? '120px' : '160px'};display:inline-block;" /></div>`
+        : '';
+
     const body = `<div class="rcp" dir="rtl">`
+        + logoHtml
         + (bizName  ? `<div class="header-name">${bizName}</div>` : '')
+        + headerTextHtml
+        + subHeadingHtml
         + (locName  ? `<div class="header-line">${locName}</div>` : '')
         + (locAddr  ? `<div class="header-line small">${locAddr}</div>` : '')
         + (locPhone ? `<div class="header-line small" dir="ltr">${locPhone}</div>` : '')
+        + (locEmail ? `<div class="header-line small" dir="ltr">${locEmail}</div>` : '')
         + (bizVat   ? `<div class="header-line">الرقم الضريبي: <span dir="ltr">${bizVat}</span></div>` : '')
         + (bizCr    ? `<div class="header-line">السجل التجاري: <span dir="ltr">${bizCr}</span></div>` : '')
         + `<hr>`
         + (isReturn ? `<div class="return-banner">مرتجع بيع</div>` : '')
-        + (invoiceNo    ? `<div class="row"><span class="right">رقم الفاتورة</span><span class="left">${invoiceNo}</span></div>` : '')
+        + invoiceHeadingHtml
+        + (invoiceNo    ? `<div class="row"><span class="right">${invoiceNoLabel}</span><span class="left">${invoiceNo}</span></div>` : '')
         + (isReturn && sale.return_parent_invoice_no ? `<div class="row"><span class="right">الفاتورة الأصلية</span><span class="left">${sale.return_parent_invoice_no}</span></div>` : '')
-        + (invoiceDate  ? `<div class="row"><span class="right">التاريخ</span><span class="left">${invoiceDate}</span></div>` : '')
-        + (customerName ? `<div class="row"><span class="right">العميل</span><span class="left" style="white-space:normal;direction:rtl;">${customerName}</span></div>` : '')
+        + (invoiceDate  ? `<div class="row"><span class="right">${dateLabel}</span><span class="left">${invoiceDate}</span></div>` : '')
+        + (showCustomer && customerName ? `<div class="row" style="align-items:flex-start;"><span class="right" style="flex:none;white-space:nowrap;">${customerLabel}</span><span class="left" style="flex:1;min-width:0;white-space:normal;word-break:break-word;direction:rtl;text-align:right;">${customerName}</span></div>` : '')
         + `<hr>`
         + itemsHtml
         + `<hr>`
         + totalsHtml
         + (qrHtml ? `<hr><div class="zatca-qr-block" style="padding-top:${is58mm ? '60px' : '50px'}">${qrHtml}</div>` : '')
+        + footerTextHtml
         + `</div>`;
 
     return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>${css}</style></head><body>${body}</body></html>`;
@@ -1161,6 +1268,249 @@ function buildCloseRegisterReceiptHtml(snapshot, form, business, thermalWidthPx)
         + (denomRows.length ? `<hr>${sectionTitle('الأوراق النقدية')}${denomRows.join('')}${grandRow('الإجمالي', f(denomTotal))}` : '')
         + `<hr>`
         + reconLine
+        + (note ? `<hr>${row('ملاحظة', `<span style="white-space:normal;direction:rtl;">${note}</span>`)}` : '')
+        + `</div>`;
+
+    return `<!doctype html><html lang="ar" dir="rtl"><head><meta charset="utf-8"><style>${css}</style></head><body>${body}</body></html>`;
+}
+
+function buildCloseRegisterReceiptHtmlDetailed(snapshot, form, business, thermalWidthPx) {
+    const reg  = snapshot?.register || {};
+    const summ = reg.summary || {};
+    const biz  = business || {};
+    const f    = makeFormatter();
+
+    const fmtHijri = (d) => d
+        ? new Date(d).toLocaleString('ar-SA-u-ca-islamic-umalqura', {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: 'numeric', minute: '2-digit', hour12: false,
+          })
+        : '';
+
+    const bizName   = biz.name || '';
+    const bizVat    = biz.tax_number_1 || '';
+    const bizCr     = biz.tax_number_2 || '';
+    const locName   = summ.location_name || '';
+    const cashier   = summ.user_name || '';
+
+    const openTime  = fmtHijri(reg.open_time);
+    const closeTime = fmtHijri(new Date());
+
+    const bodyWidth = (thermalWidthPx || 384) + 'px';
+    const baseFont  = '26px';
+    const smallFont = '24px';
+    const grandFont = '32px';
+    const tinyFont  = '22px';
+
+    const row = (label, value) =>
+        `<div class="row"><span class="right">${label}</span><span class="left">${value}</span></div>`;
+    const subrow = (label, value) =>
+        `<div class="row sub"><span class="right sub-text">${label}</span><span class="left sub-text">${value}</span></div>`;
+    const grandRow = (label, value) =>
+        `<div class="row grand"><span class="right">${label}</span><span class="left">${value}</span></div>`;
+    const sectionTitle = (label) =>
+        `<div class="section-title">${label}</div>`;
+
+    const payRow = (label, salesKey, expenseKey) => {
+        const sales   = +(summ[salesKey]   || 0);
+        const expense = +(summ[expenseKey] || 0);
+        if (sales <= 0 && expense <= 0) return '';
+        return row(label, f(sales))
+            + (expense > 0 ? subrow('  (مصاريف)', f(expense)) : '');
+    };
+
+    const payRows = [];
+    payRows.push(row('رصيد الافتتاح', f(+(summ.cash_in_hand || 0))));
+    payRows.push(payRow('نقداً',          'total_cash',          'total_cash_expense'));
+    payRows.push(payRow('شيك',            'total_cheque',        'total_cheque_expense'));
+    payRows.push(payRow('بطاقة',          'total_card',          'total_card_expense'));
+    payRows.push(payRow('تحويل بنكي',     'total_bank_transfer', 'total_bank_transfer_expense'));
+    payRows.push(payRow('سلفة',           'total_advance',       'total_advance_expense'));
+    for (let n = 1; n <= 7; n++) {
+        const name = reg.payment_types?.['custom_pay_' + n];
+        if (name) payRows.push(payRow(name, 'total_custom_pay_' + n, 'total_custom_pay_' + n + '_expense'));
+    }
+    payRows.push(payRow('أخرى', 'total_other', 'total_other_expense'));
+
+    const td           = reg.transaction_breakdown?.transaction_details;
+    const totalSale    = +(summ.total_sale    || 0);
+    const totalRefund  = +(summ.total_refund  || 0);
+    const totalExpense = +(summ.total_expense || 0);
+    const cashCollected = +(summ.cash_in_hand || 0) + +(summ.total_cash || 0) - +(summ.total_cash_refund || 0);
+    const creditSales  = td ? ((+(td.total_sales || 0)) - totalSale) : null;
+    const grandTotal   = td ? +(td.total_sales || 0) : null;
+    const sellReturnTotal = +(reg.sell_return?.total_sales || 0);
+
+    const summRows = [];
+    summRows.push(grandRow('إجمالي المبيعات', f(totalSale)));
+    if (sellReturnTotal > 0)
+        summRows.push(row('مرتجعات بيع', f(sellReturnTotal)));
+    if (totalRefund > 0)
+        summRows.push(row('إجمالي المسترد', f(totalRefund)));
+    summRows.push(row('النقد المحصّل', f(cashCollected)));
+    if (creditSales !== null && creditSales > 0.005)
+        summRows.push(row('مبيعات الآجل', f(creditSales)));
+    if (grandTotal !== null && grandTotal !== totalSale)
+        summRows.push(row('الإجمالي الكلي', f(grandTotal)));
+    if (totalExpense > 0)
+        summRows.push(row('إجمالي المصاريف', f(totalExpense)));
+
+    const closingRows = [];
+    closingRows.push(grandRow('المبلغ الختامي', f(+(form?.closing_amount || 0))));
+    const slips   = +(form?.total_card_slips || 0);
+    const cheques = +(form?.total_cheques    || 0);
+    if (slips   > 0) closingRows.push(row('إيصالات بطاقة', String(slips)));
+    if (cheques > 0) closingRows.push(row('شيكات', String(cheques)));
+
+    const denomValues = reg.cash_denomination_values || [];
+    const denomCounts = form?.denominationCounts || {};
+    const denomRows = denomValues.map(dv => {
+        const qty = +(denomCounts[String(dv)] || 0);
+        if (!qty) return '';
+        return row(`${f(+dv)} × ${qty}`, f((+dv) * qty));
+    }).filter(Boolean);
+    const denomTotal = Object.entries(denomCounts)
+        .reduce((s, [k, v]) => s + (+k) * (+(v) || 0), 0);
+
+    const reconciled = +(summ.cash_in_hand || 0) + totalSale - totalRefund - totalExpense;
+    const reconLine  = `<div class="recon">`
+        + `${f(+(summ.cash_in_hand||0))} + ${f(totalSale)} − ${f(totalRefund)} − ${f(totalExpense)}`
+        + ` = <strong>${f(reconciled)}</strong></div>`;
+
+    // product details table
+    const productDetails = reg.transaction_breakdown?.product_details || [];
+    let productSection = '';
+    if (productDetails.length) {
+        const totalQty = productDetails.reduce((s, r) => s + (+r.total_quantity || 0), 0);
+        const rows = productDetails.map((pd, i) => {
+            const varPart = pd.product_type === 'variable'
+                ? ` (${[pd.product_variation_name, pd.variation_name].filter(Boolean).join(' - ')})`
+                : '';
+            return `<tr>`
+                + `<td class="tbl-idx">${i + 1}.</td>`
+                + `<td class="tbl-sku">${pd.sku || ''}</td>`
+                + `<td class="tbl-name">${pd.product_name || ''}${varPart}</td>`
+                + `<td class="tbl-num">${pd.total_quantity}</td>`
+                + `<td class="tbl-num">${f(pd.total_amount)}</td>`
+                + `</tr>`;
+        }).join('');
+        const taxVal     = td ? +(td.total_tax || 0) : 0;
+        const discVal    = td ? +(td.total_discount || 0) : 0;
+        const shipVal    = td ? +(td.total_shipping_charges || 0) : 0;
+        const totalSales = td ? +(td.total_sales || 0) : 0;
+        const footerExtra = (taxVal  > 0 ? `<div class="tbl-foot-sub">ضريبة: (+) ${f(taxVal)}</div>` : '')
+            + (discVal > 0 ? `<div class="tbl-foot-sub">خصم: (−) ${f(discVal)}</div>` : '')
+            + (shipVal > 0 ? `<div class="tbl-foot-sub">شحن: (+) ${f(shipVal)}</div>` : '')
+            + (td ? `<div class="tbl-foot-grand">الإجمالي: ${f(totalSales)}</div>` : '');
+        productSection = `<hr>${sectionTitle('تفاصيل المنتجات المباعة')}`
+            + `<table class="tbl"><thead><tr>`
+            + `<th>#</th><th>SKU</th><th>المنتج</th><th class="num">الكمية</th><th class="num">الإجمالي</th>`
+            + `</tr></thead><tbody>${rows}</tbody>`
+            + `<tfoot><tr>`
+            + `<td colspan="3"></td>`
+            + `<td class="tbl-num">${totalQty}</td>`
+            + `<td class="num">${footerExtra}</td>`
+            + `</tr></tfoot></table>`;
+    }
+
+    // brand breakdown table
+    const brandDetails = reg.transaction_breakdown?.product_details_by_brand || [];
+    let brandSection = '';
+    if (brandDetails.length) {
+        const totalQty = brandDetails.reduce((s, r) => s + (+r.total_quantity || 0), 0);
+        const totalAmt = td ? +(td.total_sales || 0) : 0;
+        const rows = brandDetails.map((bd, i) =>
+            `<tr>`
+            + `<td class="tbl-idx">${i + 1}.</td>`
+            + `<td class="tbl-name">${bd.brand_name || '—'}</td>`
+            + `<td class="tbl-num">${bd.total_quantity}</td>`
+            + `<td class="tbl-num">${f(bd.total_amount)}</td>`
+            + `</tr>`
+        ).join('');
+        brandSection = `<hr>${sectionTitle('المنتجات حسب الماركة')}`
+            + `<table class="tbl"><thead><tr>`
+            + `<th>#</th><th>الماركة</th><th class="num">الكمية</th><th class="num">الإجمالي</th>`
+            + `</tr></thead><tbody>${rows}</tbody>`
+            + `<tfoot><tr><td colspan="2"></td>`
+            + `<td class="tbl-num">${totalQty}</td>`
+            + `<td class="tbl-num">${td ? f(totalAmt) : ''}</td>`
+            + `</tr></tfoot></table>`;
+    }
+
+    // types of service table
+    const serviceDetails = reg.transaction_breakdown?.types_of_service_details || [];
+    let serviceSection = '';
+    if (serviceDetails.length) {
+        const rows = serviceDetails.map((sv, i) =>
+            `<tr>`
+            + `<td class="tbl-idx">${i + 1}.</td>`
+            + `<td class="tbl-name">${sv.types_of_service_name || '—'}</td>`
+            + `<td class="tbl-num">${f(sv.total_sales)}</td>`
+            + `</tr>`
+        ).join('');
+        serviceSection = `<hr>${sectionTitle('تفاصيل أنواع الخدمة')}`
+            + `<table class="tbl"><thead><tr>`
+            + `<th>#</th><th>نوع الخدمة</th><th class="num">الإجمالي</th>`
+            + `</tr></thead><tbody>${rows}</tbody></table>`;
+    }
+
+    const note = (form?.closing_note || '').trim();
+
+    const css = `
+        .rcp,.rcp *{box-sizing:border-box;color:#000;-webkit-text-stroke:0.3px #000}
+        .rcp{width:${bodyWidth};max-width:${bodyWidth};font-family:'Tahoma','Arial',sans-serif;font-size:${baseFont};line-height:1.5;padding:6px;direction:rtl;text-align:right;font-weight:700;background:#fff}
+        .rcp hr{border:none;border-top:2px solid #000;margin:10px 0;display:block;width:100%}
+        .rcp .header-name{font-size:${baseFont};font-weight:900;text-align:center;margin:6px 0;-webkit-text-stroke:0.6px #000}
+        .rcp .header-line{text-align:center;margin:4px 0;font-size:${smallFont};font-weight:700}
+        .rcp .title{text-align:center;font-size:${baseFont};font-weight:900;margin:8px 0;-webkit-text-stroke:0.5px #000}
+        .rcp .section-title{font-size:${smallFont};font-weight:900;margin:8px 0 4px;border-bottom:1px solid #000;padding-bottom:3px}
+        .rcp .row{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin:5px 0;width:100%;direction:rtl}
+        .rcp .row > .right{text-align:right;flex:1;min-width:0;word-break:break-word;font-weight:700}
+        .rcp .row > .left{text-align:left;white-space:nowrap;font-weight:800;direction:ltr}
+        .rcp .row.sub{margin:2px 0 4px}
+        .rcp .row.sub .sub-text{font-size:${smallFont};font-weight:600}
+        .rcp .row.grand{font-size:${grandFont};font-weight:900;margin:10px 0;-webkit-text-stroke:0.7px #000}
+        .rcp .row.grand .left,.rcp .row.grand .right{font-size:${grandFont};font-weight:900}
+        .rcp .recon{font-size:${smallFont};font-weight:600;text-align:center;direction:ltr;margin:6px 0}
+        .rcp .tbl{width:100%;border-collapse:collapse;margin-bottom:4px;font-size:${tinyFont}}
+        .rcp .tbl th{font-weight:800;border-bottom:1.5px solid #000;padding:2px 3px;text-align:start}
+        .rcp .tbl th.num,.rcp .tbl td.num{text-align:end}
+        .rcp .tbl td{padding:2px 3px;vertical-align:top;font-weight:500}
+        .rcp .tbl tfoot td{font-weight:800;border-top:1.5px solid #000}
+        .rcp .tbl .tbl-idx{width:2em;white-space:nowrap}
+        .rcp .tbl .tbl-sku{color:#555;white-space:nowrap}
+        .rcp .tbl .tbl-name{word-break:break-word}
+        .rcp .tbl .tbl-num{text-align:end;font-variant-numeric:tabular-nums;white-space:nowrap}
+        .rcp .tbl-foot-sub{font-size:${tinyFont};font-weight:600}
+        .rcp .tbl-foot-grand{font-weight:900}
+    `.replace(/\s+/g, ' ');
+
+    const body = `<div class="rcp" dir="rtl">`
+        + (bizName  ? `<div class="header-name">${bizName}</div>` : '')
+        + (locName  ? `<div class="header-line">${locName}</div>` : '')
+        + (bizVat   ? `<div class="header-line">الرقم الضريبي: <span dir="ltr">${bizVat}</span></div>` : '')
+        + (bizCr    ? `<div class="header-line">السجل التجاري: <span dir="ltr">${bizCr}</span></div>` : '')
+        + `<hr>`
+        + `<div class="title">تقرير إغلاق الكاشير</div>`
+        + (cashier  ? `<div class="header-line">الكاشير: ${cashier}</div>` : '')
+        + `<hr>`
+        + (openTime  ? row('وقت الفتح',   openTime)  : '')
+        + (closeTime ? row('وقت الإغلاق', closeTime) : '')
+        + `<hr>`
+        + sectionTitle('طرق الدفع')
+        + payRows.join('')
+        + `<hr>`
+        + sectionTitle('الملخص المالي')
+        + summRows.join('')
+        + `<hr>`
+        + sectionTitle('الإغلاق')
+        + closingRows.join('')
+        + (denomRows.length ? `<hr>${sectionTitle('الأوراق النقدية')}${denomRows.join('')}${grandRow('الإجمالي', f(denomTotal))}` : '')
+        + `<hr>`
+        + reconLine
+        + productSection
+        + brandSection
+        + serviceSection
         + (note ? `<hr>${row('ملاحظة', `<span style="white-space:normal;direction:rtl;">${note}</span>`)}` : '')
         + `</div>`;
 

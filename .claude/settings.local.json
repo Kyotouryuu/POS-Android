@@ -56,7 +56,10 @@
       "Bash(./gradlew compileDebugJavaWithJavac)",
       "Bash(node --check offline-pos/js/printer.js)",
       "Bash(node --check offline-pos/js/receipt-print-router.js)",
-      "Bash(node --check offline-pos/js/receipt.js)"
+      "Bash(node --check offline-pos/js/receipt.js)",
+      "Bash(grep -n \"const html = \\\\`\" \"C:\\\\Users\\\\Kyo\\\\OneDrive\\\\Desktop\\\\Zat code\\\\ZatERP\\\\pos-offline\\\\offline-pos\\\\js\\\\app.js\")",
+      "Bash(grep *)",
+      "Bash(git stash *)"
     ]
   }
 }

@@ -385,7 +385,7 @@
                         <div class="font-semibold text-slate-800 truncate text-[13px] leading-snug">{{ p.name }}</div>
                         <div class="flex items-center gap-1.5 mt-0.5">
                             <span class="text-[10px] text-slate-400 truncate">{{ p.sku || '—' }}</span>
-                            <span v-if="p.enable_stock" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none flex-shrink-0"
+                            <span v-if="p.enable_stock && settings.showStockBadge" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none flex-shrink-0"
                                 :class="p.qty_available > 5 ? 'bg-slate-100 text-slate-400' : p.qty_available > 0 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'">
                                 {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
                             </span>
@@ -412,7 +412,7 @@
                 <div :style="{ height: mMGridTopPad + 'px', gridColumn: '1 / -1' }"></div>
                 <div v-for="p in mMGridVisible" :key="p.id" @click="addToCart(p)"
                     class="m-product-card relative bg-white border border-slate-100 cursor-pointer overflow-hidden p-2.5">
-                    <div v-if="p.enable_stock" class="m-stock-flag absolute top-2.5 start-0 z-10 text-[10px] font-bold pe-2.5 py-0.5 leading-none"
+                    <div v-if="p.enable_stock && settings.showStockBadge" class="m-stock-flag absolute top-2.5 start-0 z-10 text-[10px] font-bold pe-2.5 py-0.5 leading-none"
                         :class="p.qty_available > 5 ? 'bg-slate-700 text-white' : p.qty_available > 0 ? 'bg-amber-400 text-amber-950' : 'bg-rose-500 text-white'">
                         {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
                     </div>
@@ -449,7 +449,7 @@
                         <div class="font-semibold text-slate-800 truncate text-[13px] leading-snug">{{ p.name }}</div>
                         <div class="flex items-center gap-1.5 mt-0.5">
                             <span class="text-[10px] text-slate-400 truncate">{{ p.sku }}</span>
-                            <span v-if="p.enable_stock" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none flex-shrink-0"
+                            <span v-if="p.enable_stock && settings.showStockBadge" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none flex-shrink-0"
                                 :class="p.qty_available > 5 ? 'bg-slate-100 text-slate-400' : p.qty_available > 0 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'">
                                 {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
                             </span>
@@ -707,6 +707,19 @@
                 </button>
             </section>
 
+
+            <!-- Advanced (opens dedicated sub-page) -->
+            <section class="space-y-2">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_advanced_section') }}</div>
+                <button @click="settingsSubPage = 'advanced'"
+                    class="w-full flex items-center gap-3 px-4 py-3 rounded-xl border border-slate-200 bg-white active:bg-slate-50">
+                    <i class="fas fa-sliders text-amber-500"></i>
+                    <div class="flex-1 min-w-0 text-start">
+                        <div class="text-sm font-semibold text-slate-700">{{ t('m_advanced_settings_title') }}</div>
+                    </div>
+                    <i class="fas text-slate-300" :class="dir === 'rtl' ? 'fa-chevron-left' : 'fa-chevron-right'"></i>
+                </button>
+            </section>
 
             <!-- Diagnostics -->
             <section class="space-y-2">
@@ -1075,6 +1088,55 @@
                     </button>
                 </div>
             </section>
+
+            <!-- Invoice design source — 80mm thermal only. -->
+            <section class="space-y-2">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_invoice_design_section') }}</div>
+                <div class="flex items-start gap-3 px-4 py-3 rounded-xl bg-slate-50 border border-slate-200">
+                    <div class="flex-1 min-w-0">
+                        <div class="text-sm font-semibold text-slate-700">{{ t('use_server_invoice_design') }}</div>
+                        <div class="text-[11px] text-slate-400 mt-0.5 leading-snug">{{ t('use_server_invoice_design_help') }}</div>
+                    </div>
+                    <button @click="toggleUseServerInvoiceDesign(!useServerInvoiceDesign)" type="button" role="switch" :aria-checked="useServerInvoiceDesign"
+                        class="relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                        :class="useServerInvoiceDesign ? 'bg-amber-500' : 'bg-slate-300'">
+                        <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out"
+                            :class="useServerInvoiceDesign ? (dir === 'rtl' ? '-translate-x-5' : 'translate-x-5') : 'translate-x-0'"></span>
+                    </button>
+                </div>
+            </section>
+        </div>
+      </template>
+
+      <!-- ════════ SETTINGS → ADVANCED (sub-page) ════════ -->
+      <template v-else-if="currentPage === 'settings' && settingsSubPage === 'advanced'">
+        <div class="px-4 py-3 bg-white border-b border-slate-100 flex-shrink-0 flex items-center gap-3">
+            <button @click="settingsSubPage = 'main'" class="w-9 h-9 -ms-2 rounded-full active:bg-slate-100 flex items-center justify-center">
+                <i class="fas text-slate-600" :class="dir === 'rtl' ? 'fa-chevron-right' : 'fa-chevron-left'"></i>
+            </button>
+            <h3 class="font-bold text-slate-800">{{ t('m_advanced_settings_title') }}</h3>
+        </div>
+        <div class="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6">
+
+            <!-- Display -->
+            <section class="space-y-2">
+                <div class="text-xs font-bold text-slate-400 uppercase tracking-wide">{{ t('m_display_section') }}</div>
+                <div class="rounded-xl border border-slate-200 divide-y divide-slate-100">
+                    <div class="flex items-center justify-between px-4 py-3 gap-3">
+                        <div class="min-w-0">
+                            <div class="text-sm font-semibold text-slate-700">{{ t('m_show_stock_badge') }}</div>
+                            <div class="text-xs text-slate-400 mt-0.5">{{ t('m_show_stock_badge_hint') }}</div>
+                        </div>
+                        <button type="button" @click="settings.showStockBadge = !settings.showStockBadge; persistConfig()"
+                            class="relative flex-shrink-0 inline-flex h-6 w-11 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none"
+                            :class="settings.showStockBadge ? 'bg-amber-500' : 'bg-slate-300'">
+                            <span class="pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow transition duration-200 ease-in-out"
+                                :class="settings.showStockBadge ? (dir === 'rtl' ? '-translate-x-5' : 'translate-x-5') : 'translate-x-0'"></span>
+                        </button>
+                    </div>
+                </div>
+            </section>
+
         </div>
       </template>
 
@@ -1139,7 +1201,7 @@
                             <div class="font-semibold text-slate-800 truncate text-[13px] leading-snug">{{ p.name }}</div>
                             <div class="flex items-center gap-1.5 mt-0.5">
                                 <span class="text-[10px] text-slate-400 truncate">{{ p.sku || '—' }}</span>
-                                <span v-if="p.enable_stock" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none flex-shrink-0"
+                                <span v-if="p.enable_stock && settings.showStockBadge" class="text-[9px] font-bold px-1.5 py-0.5 rounded-full leading-none flex-shrink-0"
                                     :class="p.qty_available > 5 ? 'bg-slate-100 text-slate-400' : p.qty_available > 0 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-600'">
                                     {{ p.qty_available > 0 ? p.qty_available : t('out_of_stock') }}
                                 </span>
@@ -1907,8 +1969,122 @@
                 <textarea rows="2" v-model="closeRegisterForm.closing_note" class="w-full border border-slate-200 rounded-xl px-3 py-2.5 text-sm resize-none"></textarea>
             </label>
 
+            <!-- Products sold by product -->
+            <template v-if="closeRegisterSnapshot?.register?.transaction_breakdown?.product_details?.length">
+                <div class="rounded-xl border border-slate-100 overflow-hidden">
+                    <p class="text-xs font-bold text-slate-500 uppercase tracking-wide px-4 py-2 bg-slate-50 border-b border-slate-100">{{ t('products_sold_details') }}</p>
+                    <table class="w-full text-xs">
+                        <thead>
+                            <tr class="bg-slate-50/60 border-b border-slate-100 text-slate-500 font-semibold">
+                                <th class="text-start px-3 py-2">{{ t('col_no') }}</th>
+                                <th class="text-start px-3 py-2">{{ t('col_sku') }}</th>
+                                <th class="text-start px-3 py-2">{{ t('col_product') }}</th>
+                                <th class="text-end px-3 py-2">{{ t('col_qty') }}</th>
+                                <th class="text-end px-3 py-2">{{ t('col_amount') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-50 text-slate-700">
+                            <tr v-for="(pd, idx) in closeRegisterSnapshot.register.transaction_breakdown.product_details" :key="'pd-'+idx">
+                                <td class="px-3 py-2">{{ idx + 1 }}.</td>
+                                <td class="px-3 py-2 text-slate-500">{{ pd.sku }}</td>
+                                <td class="px-3 py-2">
+                                    {{ pd.product_name }}
+                                    <template v-if="pd.product_type === 'variable'">
+                                        {{ pd.product_variation_name }} - {{ pd.variation_name }}
+                                    </template>
+                                </td>
+                                <td class="px-3 py-2 text-end tabular-nums">{{ pd.total_quantity }}</td>
+                                <td class="px-3 py-2 text-end tabular-nums">{{ fmt(pd.total_amount) }}</td>
+                            </tr>
+                        </tbody>
+                        <tfoot v-if="closeRegisterSnapshot.register.transaction_breakdown.transaction_details">
+                            <tr class="border-t border-slate-200 bg-slate-50 font-semibold text-slate-700">
+                                <td colspan="3" class="px-3 py-2"></td>
+                                <td class="px-3 py-2 text-end tabular-nums">
+                                    {{ closeRegisterSnapshot.register.transaction_breakdown.product_details.reduce((s, r) => s + (+r.total_quantity || 0), 0) }}
+                                </td>
+                                <td class="px-3 py-2 text-end">
+                                    <div v-if="+closeRegisterSnapshot.register.transaction_breakdown.transaction_details.total_tax">
+                                        {{ t('order_tax') }}: (+) {{ fmt(closeRegisterSnapshot.register.transaction_breakdown.transaction_details.total_tax) }}
+                                    </div>
+                                    <div v-if="+closeRegisterSnapshot.register.transaction_breakdown.transaction_details.total_discount">
+                                        {{ t('discount') }}: (−) {{ fmt(closeRegisterSnapshot.register.transaction_breakdown.transaction_details.total_discount) }}
+                                    </div>
+                                    <div v-if="+closeRegisterSnapshot.register.transaction_breakdown.transaction_details.total_shipping_charges">
+                                        {{ t('shipping_charges') }}: (+) {{ fmt(closeRegisterSnapshot.register.transaction_breakdown.transaction_details.total_shipping_charges) }}
+                                    </div>
+                                    <div class="font-bold">
+                                        {{ t('grand_total') }}: {{ fmt(closeRegisterSnapshot.register.transaction_breakdown.transaction_details.total_sales) }}
+                                    </div>
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </template>
+
+            <!-- Products sold by brand -->
+            <template v-if="closeRegisterSnapshot?.register?.transaction_breakdown?.product_details_by_brand?.length">
+                <div class="rounded-xl border border-slate-100 overflow-hidden">
+                    <p class="text-xs font-bold text-slate-500 uppercase tracking-wide px-4 py-2 bg-slate-50 border-b border-slate-100">{{ t('products_by_brand') }}</p>
+                    <table class="w-full text-xs">
+                        <thead>
+                            <tr class="bg-slate-50/60 border-b border-slate-100 text-slate-500 font-semibold">
+                                <th class="text-start px-3 py-2">{{ t('col_no') }}</th>
+                                <th class="text-start px-3 py-2">{{ t('col_brand') }}</th>
+                                <th class="text-end px-3 py-2">{{ t('col_qty') }}</th>
+                                <th class="text-end px-3 py-2">{{ t('col_amount') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-50 text-slate-700">
+                            <tr v-for="(bd, idx) in closeRegisterSnapshot.register.transaction_breakdown.product_details_by_brand" :key="'bd-'+idx">
+                                <td class="px-3 py-2">{{ idx + 1 }}.</td>
+                                <td class="px-3 py-2">{{ bd.brand_name || '—' }}</td>
+                                <td class="px-3 py-2 text-end tabular-nums">{{ bd.total_quantity }}</td>
+                                <td class="px-3 py-2 text-end tabular-nums">{{ fmt(bd.total_amount) }}</td>
+                            </tr>
+                        </tbody>
+                        <tfoot v-if="closeRegisterSnapshot.register.transaction_breakdown.transaction_details">
+                            <tr class="border-t border-slate-200 bg-slate-50 font-semibold text-slate-700">
+                                <td colspan="2" class="px-3 py-2"></td>
+                                <td class="px-3 py-2 text-end tabular-nums">
+                                    {{ closeRegisterSnapshot.register.transaction_breakdown.product_details_by_brand.reduce((s, r) => s + (+r.total_quantity || 0), 0) }}
+                                </td>
+                                <td class="px-3 py-2 text-end font-bold">
+                                    {{ t('grand_total') }}: {{ fmt(closeRegisterSnapshot.register.transaction_breakdown.transaction_details.total_sales) }}
+                                </td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            </template>
+
+            <!-- Types of service -->
+            <template v-if="closeRegisterSnapshot?.register?.transaction_breakdown?.types_of_service_details?.length">
+                <div class="rounded-xl border border-slate-100 overflow-hidden">
+                    <p class="text-xs font-bold text-slate-500 uppercase tracking-wide px-4 py-2 bg-slate-50 border-b border-slate-100">{{ t('types_of_service_details') }}</p>
+                    <table class="w-full text-xs">
+                        <thead>
+                            <tr class="bg-slate-50/60 border-b border-slate-100 text-slate-500 font-semibold">
+                                <th class="text-start px-3 py-2">{{ t('col_no') }}</th>
+                                <th class="text-start px-3 py-2">{{ t('col_types_of_service') }}</th>
+                                <th class="text-end px-3 py-2">{{ t('col_amount') }}</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-50 text-slate-700">
+                            <tr v-for="(sv, idx) in closeRegisterSnapshot.register.transaction_breakdown.types_of_service_details" :key="'tos-'+idx">
+                                <td class="px-3 py-2">{{ idx + 1 }}</td>
+                                <td class="px-3 py-2">{{ sv.types_of_service_name || '—' }}</td>
+                                <td class="px-3 py-2 text-end tabular-nums">{{ fmt(sv.total_sales) }}</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </template>
+
             <div class="flex gap-2 pt-1 pb-2">
                 <button @click="dismissCloseRegisterModal" class="flex-1 py-3 rounded-xl text-sm font-semibold border border-slate-200 text-slate-700">{{ t('cancel') }}</button>
+                <button @click="printCloseRegister" :disabled="closeRegisterPrintBusy" class="py-3 px-4 rounded-xl text-sm font-semibold border border-slate-200 text-slate-700 flex items-center gap-1.5 disabled:opacity-40"><i class="fas fa-print text-xs"></i> {{ t('print') }}</button>
                 <button @click="submitCloseRegister" class="flex-1 py-3 rounded-xl text-sm font-bold bg-rose-600 text-white">{{ t('confirm_close_register') }}</button>
             </div>
         </div>
