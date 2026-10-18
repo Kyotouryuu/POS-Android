@@ -965,7 +965,8 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
         + (invoiceNo    ? `<div class="row"><span class="right">${invoiceNoLabel}</span><span class="left">${invoiceNo}</span></div>` : '')
         + (isReturn && sale.return_parent_invoice_no ? `<div class="row"><span class="right">الفاتورة الأصلية</span><span class="left">${sale.return_parent_invoice_no}</span></div>` : '')
         + (invoiceDate  ? `<div class="row"><span class="right">${dateLabel}</span><span class="left">${invoiceDate}</span></div>` : '')
-        + (showCustomer && customerName ? `<div class="row" style="align-items:flex-start;"><span class="right" style="flex:none;white-space:nowrap;">${customerLabel}</span><span class="left" style="flex:1;min-width:0;white-space:normal;word-break:break-word;direction:rtl;text-align:right;">${customerName}</span></div>` : '')
+        + (showCustomer && customerName ? `<div class="row" style="align-items:flex-start;"><span class="right" style="flex:none;white-space:nowrap;">${customerLabel}</span><span class="left" style="white-space:normal;word-break:break-word;direction:rtl;">${customerName}</span></div>` : '')
+        + (showCustomer && sale.customer_tax_number ? `<div class="row"><span class="right">الرقم الضريبي للعميل</span><span class="left" dir="ltr">${sale.customer_tax_number}</span></div>` : '')
         + `<hr>`
         + itemsHtml
         + `<hr>`

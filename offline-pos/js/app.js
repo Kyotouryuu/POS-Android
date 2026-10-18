@@ -2283,6 +2283,7 @@ createApp({
                 customer_id:        selectedCustomer.value?.id    || null,
                 customer_name:      selectedCustomer.value?.name  || 'Walk-in',
                 customer_phone:     selectedCustomer.value?.phone || null,
+                customer_tax_number: selectedCustomer.value?.tax_number || null,
                 local_customer_uuid: selectedCustomer.value?.local_customer_uuid || null,
                 new_customer:       buildNewCustomerForTransaction(selectedCustomer.value),
                 items:           cloneForIdb(cart.value),
@@ -3357,7 +3358,7 @@ createApp({
         };
 
         const checkForUpdate = async () => {
-            if (!isOnline.value || !appVersion.value) return;
+            if (!isOnline.value || !appVersion.value || appVersion.value === 'unknown') return;
             updateStatus.value = 'checking';
             try {
                 const res = await fetch('https://zaterp.com/api/app-version/mobile');
