@@ -94,6 +94,7 @@ createApp({
         const priceGroups      = ref([]);
         const invoiceSchemes   = ref([]);
         const customerGroups   = ref([]);
+        const deliveryPlatforms = ref([]);
 
         // ── Cart ─────────────────────────────────────────────────────────────
         const cart                 = ref([]);
@@ -110,6 +111,8 @@ createApp({
         const commissionAgentId     = ref('');
         const selectedPriceGroupId  = ref('');
         const invoiceSchemeId       = ref('');
+        const orderType             = ref('');
+        const selectedDeliveryPlatformId = ref('');
 
         // ── Shipping ─────────────────────────────────────────────────────────
         const shippingCharges  = ref(0);
@@ -333,6 +336,8 @@ createApp({
             apiKey:         '',
             locationId:     '',
             showStockBadge: true,
+            devForceUpdate: false,
+            enableRestaurantOrderTypes: false,
         });
 
         // ── i18n / language ──────────────────────────────────────────────────
@@ -921,12 +926,44 @@ createApp({
             return null;
         });
 
-        // Price-group aware product list
+        const activeDeliveryPlatforms = computed(() =>
+            (deliveryPlatforms.value || []).filter((p) => p && p.is_active !== 0 && p.is_active !== false && p.is_active !== '0')
+        );
+
+        const selectedDeliveryPlatform = computed(() =>
+            activeDeliveryPlatforms.value.find((p) => String(p.id) === String(selectedDeliveryPlatformId.value)) || null
+        );
+
+        // Platform price wins while an order type and platform are selected.
+        // Otherwise a price group overrides the catalog price, matching the previous POS behavior.
+        const resolveSellPriceIncTax = (product) => {
+            if (!product) return 0;
+            const platform = settings.value.enableRestaurantOrderTypes && orderType.value
+                ? selectedDeliveryPlatform.value
+                : null;
+            if (platform) {
+                const pp = (product.platform_prices || []).find(
+                    (row) => String(row.delivery_platform_id) === String(platform.id)
+                );
+                if (pp && +pp.price_inc_tax > 0) return +pp.price_inc_tax;
+                return +(product.sell_price_inc_tax || 0);
+            }
+            if (selectedPriceGroupId.value) {
+                const gp = (product.price_groups || []).find(
+                    (g) => String(g.price_group_id) === String(selectedPriceGroupId.value)
+                );
+                if (gp && gp.price_inc_tax != null && gp.price_inc_tax !== '') return +gp.price_inc_tax;
+            }
+            return +(product.sell_price_inc_tax || 0);
+        };
+
         const pricedProducts = computed(() => {
-            if (!selectedPriceGroupId.value) return products.value;
-            return products.value.map(p => {
-                const gp = (p.price_groups || []).find(g => String(g.price_group_id) === String(selectedPriceGroupId.value));
-                return gp ? { ...p, sell_price_inc_tax: gp.price_inc_tax } : p;
+            if (!selectedPriceGroupId.value && !(settings.value.enableRestaurantOrderTypes && orderType.value && selectedDeliveryPlatform.value)) {
+                return products.value;
+            }
+            return products.value.map((p) => {
+                const price = resolveSellPriceIncTax(p);
+                return price === +p.sell_price_inc_tax ? p : { ...p, sell_price_inc_tax: price };
             });
         });
 
@@ -1360,6 +1397,63 @@ createApp({
             };
         };
 
+        const repriceCartForOrderType = () => {
+            if (!cart.value.length) return;
+            const byId = new Map(products.value.map((p) => [String(p.id), p]));
+            cart.value = cart.value.map((item) => {
+                const product = byId.get(String(item.variation_id));
+                if (!product) return item;
+                const mods = lineModifiersTotal(item);
+                const priceIncTax = resolveSellPriceIncTax(product) + mods;
+                const taxPercent = item.tax_percent || 0;
+                const unitPriceExc = taxPercent > 0 ? priceIncTax / (1 + taxPercent / 100) : priceIncTax;
+                return {
+                    ...item,
+                    unit_price:         priceIncTax,
+                    unit_price_exc_tax: +unitPriceExc.toFixed(4),
+                    item_tax_per_unit:  +(priceIncTax - unitPriceExc).toFixed(4),
+                };
+            });
+        };
+
+        const setOrderType = (val) => {
+            if (!settings.value.enableRestaurantOrderTypes) return;
+            orderType.value = orderType.value === val ? '' : val;
+            if (!orderType.value) selectedDeliveryPlatformId.value = '';
+            repriceCartForOrderType();
+        };
+
+        const toggleDeliveryPlatform = (id) => {
+            if (!settings.value.enableRestaurantOrderTypes || !orderType.value) return;
+            selectedDeliveryPlatformId.value = String(selectedDeliveryPlatformId.value) === String(id) ? '' : String(id);
+            repriceCartForOrderType();
+        };
+
+        const toggleRestaurantOrderTypes = async (enabled) => {
+            settings.value.enableRestaurantOrderTypes = !!enabled;
+            if (!enabled) {
+                orderType.value = '';
+                selectedDeliveryPlatformId.value = '';
+                repriceCartForOrderType();
+            }
+            const existing = await db.settings.get('config');
+            let data = {};
+            if (existing?.data && typeof existing.data === 'object') data = { ...existing.data };
+            else if (existing) {
+                const { key, ...rest } = existing;
+                data = { ...rest };
+            }
+            data.enableRestaurantOrderTypes = !!enabled;
+            await db.settings.put({ key: 'config', data: cloneForIdb(data) });
+        };
+
+        const orderTypeLabel = (mode) => {
+            if (mode === 'delivery') return t('ot_delivery');
+            if (mode === 'pickup') return t('ot_pickup');
+            if (mode === 'dine_in') return t('ot_dine_in');
+            return '';
+        };
+
         const addToCart = (product) => {
             productSearch.value         = '';
             showProductSuggestion.value = false;
@@ -1443,6 +1537,8 @@ createApp({
                 invoiceSchemeId.value        = '';
                 transactionDate.value        = new Date().toISOString().slice(0, 16);
                 selectedOrderTaxRateId.value = '';
+                orderType.value              = '';
+                selectedDeliveryPlatformId.value = '';
             }
             // Bug 1 fix: reset payment state so prior sale data never bleeds into next
             enableRoundOff.value       = false;
@@ -2131,6 +2227,12 @@ createApp({
             transaction_date:        transactionDate.value,
             tax_rate_id:             selectedOrderTaxRateId.value,
             enable_round_off:        enableRoundOff.value,
+            service_mode:            orderType.value || null,
+            delivery_platform_id:    selectedDeliveryPlatform.value ? selectedDeliveryPlatform.value.id : null,
+            delivery_platform_name:  selectedDeliveryPlatform.value ? selectedDeliveryPlatform.value.name : null,
+            platform_commission_pct: selectedDeliveryPlatform.value && selectedDeliveryPlatform.value.commission_pct != null && selectedDeliveryPlatform.value.commission_pct !== ''
+                ? +selectedDeliveryPlatform.value.commission_pct
+                : null,
             held_at:                 new Date().toISOString(),
         });
 
@@ -2178,6 +2280,10 @@ createApp({
             transactionDate.value        = held.transaction_date    || new Date().toISOString().slice(0, 16);
             selectedOrderTaxRateId.value = held.tax_rate_id         || '';
             enableRoundOff.value         = held.enable_round_off    || false;
+            if (settings.value.enableRestaurantOrderTypes) {
+                orderType.value = held.service_mode || '';
+                selectedDeliveryPlatformId.value = orderType.value ? (held.delivery_platform_id || '') : '';
+            }
             if (held.customer_id) {
                 const c = findCustomerInList(held.customer_id);
                 if (c) selectCustomer(c);
@@ -2227,6 +2333,10 @@ createApp({
             invoiceSchemeId.value        = sale.invoice_scheme_id   || '';
             transactionDate.value        = sale.transaction_date    || new Date().toISOString().slice(0, 16);
             selectedOrderTaxRateId.value = sale.tax_rate_id         || '';
+            if (settings.value.enableRestaurantOrderTypes) {
+                orderType.value = sale.service_mode || '';
+                selectedDeliveryPlatformId.value = orderType.value ? (sale.delivery_platform_id || '') : '';
+            }
             if (sale.customer_id) {
                 const c = findCustomerInList(sale.customer_id);
                 if (c) selectCustomer(c);
@@ -2319,6 +2429,17 @@ createApp({
                 transaction_date:        transactionDate.value,
                 tax_rate_id:             selectedOrderTaxRateId.value || null,
                 round_off_amount:        roundOffAmount.value,
+                service_mode:            settings.value.enableRestaurantOrderTypes ? (orderType.value || null) : null,
+                delivery_platform_id:    settings.value.enableRestaurantOrderTypes && orderType.value && selectedDeliveryPlatform.value
+                    ? selectedDeliveryPlatform.value.id
+                    : null,
+                delivery_platform_name:  settings.value.enableRestaurantOrderTypes && orderType.value && selectedDeliveryPlatform.value
+                    ? selectedDeliveryPlatform.value.name
+                    : null,
+                platform_commission_pct: settings.value.enableRestaurantOrderTypes && orderType.value && selectedDeliveryPlatform.value
+                    && selectedDeliveryPlatform.value.commission_pct != null && selectedDeliveryPlatform.value.commission_pct !== ''
+                    ? +selectedDeliveryPlatform.value.commission_pct
+                    : null,
                 // Change return
                 change_return_amount:    changeReturn.value,
                 change_return_method:    changeReturnMethod.value,
@@ -2886,7 +3007,7 @@ createApp({
             }
 
             const [cats, brnds, locs, biz, prn, ils, lsa, rtpl, rtplDesign, txRates,
-                   commAg, prGrps, invSch, custGrp, localPrn, localPrs] = await Promise.all([
+                   commAg, prGrps, invSch, custGrp, localPrn, localPrs, dPlatforms] = await Promise.all([
                 db.settings.get('categories'),
                 db.settings.get('brands'),
                 db.settings.get('locations'),
@@ -2903,6 +3024,7 @@ createApp({
                 db.settings.get('customer_groups'),
                 db.settings.get('local_printer_config'),
                 db.settings.get('printers_local'),
+                db.settings.get('delivery_platforms'),
             ]);
             if (cats?.data)       categories.value           = cats.data;
             if (brnds?.data)      brands.value               = brnds.data;
@@ -2920,6 +3042,7 @@ createApp({
             if (prGrps?.data)     priceGroups.value          = prGrps.data;
             if (invSch?.data)     invoiceSchemes.value       = invSch.data;
             if (custGrp?.data && Array.isArray(custGrp.data)) customerGroups.value = custGrp.data;
+            if (Array.isArray(dPlatforms?.data)) deliveryPlatforms.value = dPlatforms.data;
 
             const mobilePrn = await db.settings.get('mobile_printer_config');
             if (mobilePrn?.data) {
@@ -3365,7 +3488,7 @@ createApp({
                 if (!res.ok) throw new Error('HTTP ' + res.status);
                 const data = await res.json();
                 if (!data.version) throw new Error('No version');
-                if (semverGt(data.version, appVersion.value)) {
+                if (semverGt(data.version, appVersion.value) || settings.value.devForceUpdate) {
                     updateStatus.value = 'update_available';
                     updateInfo.value   = { version: data.version, downloadUrl: data.download_url };
                 } else {
@@ -3867,6 +3990,7 @@ createApp({
             if (cfg.price_groups)      priceGroups.value      = cfg.price_groups;
             if (cfg.invoice_schemes)   invoiceSchemes.value   = cfg.invoice_schemes;
             if (cfg.customer_groups)    customerGroups.value   = cfg.customer_groups;
+            if (Array.isArray(cfg.delivery_platforms)) deliveryPlatforms.value = cfg.delivery_platforms;
 
             // Payment methods from server config
             if (cfg.payment_types && typeof cfg.payment_types === 'object') {
@@ -3889,6 +4013,7 @@ createApp({
                 db.settings.put({ key: 'price_groups',       data: cloneForIdb(priceGroups.value) }),
                 db.settings.put({ key: 'invoice_schemes',    data: cloneForIdb(invoiceSchemes.value) }),
                 db.settings.put({ key: 'customer_groups',    data: cloneForIdb(customerGroups.value) }),
+                db.settings.put({ key: 'delivery_platforms', data: cloneForIdb(deliveryPlatforms.value) }),
             ];
             if (cfg.receipt_template)        puts.push(db.settings.put({ key: 'receipt_template',        data: cfg.receipt_template }));
             if (cfg.receipt_template_design) puts.push(db.settings.put({ key: 'receipt_template_design', data: cfg.receipt_template_design }));
@@ -3933,6 +4058,7 @@ createApp({
                         has_lots:            !!(product.has_lots || p.has_lots),
                         lots:                p.lots || [],
                         price_groups:        p.price_groups || [],
+                        platform_prices:     p.platform_prices || [],
                         warranty_id:         product.warranty_id || null,
                     };
                 });
@@ -3941,6 +4067,10 @@ createApp({
             });
 
             products.value = await db.products.toArray();
+            if (selectedDeliveryPlatformId.value && !selectedDeliveryPlatform.value) {
+                selectedDeliveryPlatformId.value = '';
+            }
+            if (orderType.value) repriceCartForOrderType();
             addLog(`Products done: ${productCount}.`);
 
             // 3. Customers (paginated)
@@ -4097,6 +4227,11 @@ createApp({
                 invoice_scheme_id:       s.invoice_scheme_id    || null,
                 tax_rate_id:             s.tax_rate_id          || null,
                 round_off_amount:        +(s.round_off_amount   || 0),
+                service_mode:            s.service_mode || null,
+                delivery_platform_id:    s.delivery_platform_id || null,
+                platform_commission_pct: s.platform_commission_pct != null && s.platform_commission_pct !== ''
+                    ? +s.platform_commission_pct
+                    : null,
                 change_return_amount:    +(s.change_return_amount || 0),
                 change_return_method:    s.change_return_method  || null,
                 sell_lines: (s.items || []).map(item => ({
@@ -5452,6 +5587,8 @@ createApp({
             orderDiscountInput, discountType, saleNote, staffNote, saleStatus,
             // Order config
             transactionDate, commissionAgentId, selectedPriceGroupId, invoiceSchemeId,
+            orderType, selectedDeliveryPlatformId, activeDeliveryPlatforms, selectedDeliveryPlatform,
+            setOrderType, toggleDeliveryPlatform, toggleRestaurantOrderTypes, orderTypeLabel,
             // Shipping
             shippingCharges, shippingDetails, shippingAddress, shippingStatus, deliveredTo, deliveryPerson,
             showShippingModal,

@@ -551,6 +551,30 @@ function buildTotalsHtml(sale, design, settings) {
 
 // ─── Fill a server-rendered receipt template with sale-specific data ──────────
 // The template was pre-rendered by the Blade view with placeholder tokens.
+function escReceiptText(value) {
+    return String(value ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+}
+
+function orderTypeReceiptLabel(mode) {
+    if (mode === 'delivery') return t('ot_delivery');
+    if (mode === 'pickup') return t('ot_pickup');
+    if (mode === 'dine_in') return t('ot_dine_in');
+    return '';
+}
+
+function orderTypeReceiptSnippet(sale) {
+    const labels = { delivery: t('ot_delivery'), pickup: t('ot_pickup'), dine_in: t('ot_dine_in') };
+    const modeLabel = labels[sale?.service_mode] || '';
+    const platform = sale?.delivery_platform_name ? String(sale.delivery_platform_name) : '';
+    if (!modeLabel && !platform) return '';
+    const parts = [];
+    if (modeLabel) parts.push(`${t('ot_order_type')}: ${escReceiptText(modeLabel)}`);
+    if (platform) parts.push(`${t('ot_platform')}: ${escReceiptText(platform)}`);
+    return `<div style="text-align:center;font-weight:700;margin:4px 0;">${parts.join(' · ')}</div>`;
+}
+
 function fillReceiptTemplate(templateHtml, sale, settings, locations, invoiceLayouts, design) {
     const resolvedDesign = design || 'slim';
     const layout = getInvoiceLayoutForSale(sale, locations, invoiceLayouts, settings) || {};
@@ -572,7 +596,7 @@ function fillReceiptTemplate(templateHtml, sale, settings, locations, invoiceLay
     let html = templateHtml
         .replace(/ZAT_INVOICE_NO/g,   invoiceNo)
         .replace(/ZAT_INVOICE_DATE/g,  invoiceDate)
-        .replace(/ZAT_CUSTOMER_INFO/g, customerInfo);
+        .replace(/ZAT_CUSTOMER_INFO/g, customerInfo + orderTypeReceiptSnippet(sale));
 
     if (isReturn) {
         const returnBadge = `<div style="text-align:center;font-weight:900;font-size:1.3em;border:2px solid #000;padding:4px 0;margin:6px 0;">مرتجع بيع</div>`;
@@ -966,7 +990,9 @@ function buildMobileThermalReceiptHtml(sale, settings, business, locations, invo
         + (isReturn && sale.return_parent_invoice_no ? `<div class="row"><span class="right">الفاتورة الأصلية</span><span class="left">${sale.return_parent_invoice_no}</span></div>` : '')
         + (invoiceDate  ? `<div class="row"><span class="right">${dateLabel}</span><span class="left">${invoiceDate}</span></div>` : '')
         + (showCustomer && customerName ? `<div class="row" style="align-items:flex-start;"><span class="right" style="flex:none;white-space:nowrap;">${customerLabel}</span><span class="left" style="white-space:normal;word-break:break-word;direction:rtl;">${customerName}</span></div>` : '')
-        + (showCustomer && sale.customer_tax_number ? `<div class="row"><span class="right">الرقم الضريبي للعميل</span><span class="left" dir="ltr">${sale.customer_tax_number}</span></div>` : '')
+        + (showCustomer && sale.customer_tax_number ? `<div class="row"><span class="right">الضريبة</span><span class="left" dir="ltr">${sale.customer_tax_number}</span></div>` : '')
+        + (sale.service_mode ? `<div class="row"><span class="right">${t('ot_order_type')}</span><span class="left" style="direction:rtl;">${escReceiptText(orderTypeReceiptLabel(sale.service_mode))}</span></div>` : '')
+        + (sale.delivery_platform_name ? `<div class="row"><span class="right">${t('ot_platform')}</span><span class="left" style="direction:rtl;">${escReceiptText(sale.delivery_platform_name)}</span></div>` : '')
         + `<hr>`
         + itemsHtml
         + `<hr>`
@@ -1051,6 +1077,8 @@ function buildMobileCompanyCopyHtml(sale, settings, business, locations, thermal
         + `<div style="border-top:1px solid #000;padding-top:${is58mm ? '6px' : '8px'};margin-bottom:${is58mm ? '6px' : '8px'};">`
             + infoRow(t('receipt_invoice_no') || 'رقم الفاتورة', invoiceNo)
             + infoRow(t('receipt_date') || 'التاريخ', invoiceDate)
+            + (sale.service_mode ? infoRow(t('ot_order_type'), orderTypeReceiptLabel(sale.service_mode)) : '')
+            + (sale.delivery_platform_name ? infoRow(t('ot_platform'), escReceiptText(sale.delivery_platform_name)) : '')
         + `</div>`;
 
     const bodyWidth = thermalWidthPx + 'px';
